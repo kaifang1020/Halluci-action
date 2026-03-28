@@ -1,0 +1,418 @@
+SELECT * diff to log the difference between Database pre action and after agent action is impossible.
+Instead, Use PG triggers as the primary mechanism — zero overhead, catches everything, no snapshot diff needed at all.
+
+三、PostgreSQL Trigger 方案的完整实现
+这是最干净的做法。思路是：不要在 agent action 前后主动查数据库，而是让数据库自己记录每次变化，你只需要在 action 结束后去捞这段时间内发生的所有变更。
+第一步：建 shadow 表 + 通用 trigger function
+-- 在 PostgreSQL 里执行（一次性初始化）
+-- 可以在 docker exec 进容器后执行，或者通过 psycopg2 运行
+
+-- 1. 通用变更记录表
+CREATE TABLE IF NOT EXISTS env_change_log (
+    id           SERIAL PRIMARY KEY,
+    occurred_at  TIMESTAMP DEFAULT NOW(),
+    table_name   TEXT NOT NULL,
+    operation    TEXT NOT NULL,      -- INSERT / UPDATE / DELETE
+    row_id       INTEGER,
+    old_data     JSONB,              -- UPDATE/DELETE 时的旧值
+    new_data     JSONB,              -- INSERT/UPDATE 时的新值
+    changed_fields JSONB             -- UPDATE 时只记录变化的字段
+);
+
+CREATE INDEX idx_env_change_log_time ON env_change_log(occurred_at);
+CREATE INDEX idx_env_change_log_table ON env_change_log(table_name);
+
+-- 2. 通用 trigger function（所有表共用一个）
+CREATE OR REPLACE FUNCTION log_env_change()
+RETURNS TRIGGER AS $$
+DECLARE
+    changed JSONB := '{}';
+    key TEXT;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO env_change_log(table_name, operation, row_id, new_data)
+        VALUES (TG_TABLE_NAME, 'INSERT', NEW.id, to_jsonb(NEW));
+
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- 只记录真正变化的字段，不存全行
+        FOR key IN SELECT jsonb_object_keys(to_jsonb(NEW)) LOOP
+            IF (to_jsonb(OLD) -> key) IS DISTINCT FROM (to_jsonb(NEW) -> key) THEN
+                changed := changed || jsonb_build_object(
+                    key, jsonb_build_object(
+                        'before', to_jsonb(OLD) -> key,
+                        'after',  to_jsonb(NEW) -> key
+                    )
+                );
+            END IF;
+        END LOOP;
+
+        IF changed != '{}' THEN
+            INSERT INTO env_change_log(
+                table_name, operation, row_id,
+                old_data, new_data, changed_fields
+            ) VALUES (
+                TG_TABLE_NAME, 'UPDATE', NEW.id,
+                to_jsonb(OLD), to_jsonb(NEW), changed
+            );
+        END IF;
+
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO env_change_log(table_name, operation, row_id, old_data)
+        VALUES (TG_TABLE_NAME, 'DELETE', OLD.id, to_jsonb(OLD));
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3. 给你关心的表挂上 trigger
+CREATE TRIGGER trg_pos_order
+    AFTER INSERT OR UPDATE OR DELETE ON pos_order
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_crm_lead
+    AFTER INSERT OR UPDATE OR DELETE ON crm_lead
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_stock_move
+    AFTER INSERT OR UPDATE OR DELETE ON stock_move
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_stock_quant
+    AFTER INSERT OR UPDATE OR DELETE ON stock_quant
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_hr_attendance
+    AFTER INSERT OR UPDATE OR DELETE ON hr_attendance
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_hr_leave
+    AFTER INSERT OR UPDATE OR DELETE ON hr_leave
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_project_task
+    AFTER INSERT OR UPDATE OR DELETE ON project_task
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+CREATE TRIGGER trg_mail_mail
+    AFTER INSERT OR UPDATE OR DELETE ON mail_mail
+    FOR EACH ROW EXECUTE FUNCTION log_env_change();
+
+第二步：Gateway 完全重写，不再做 SELECT * diff
+# research/gateway.py — trigger-based 版本，干净得多
+
+import json, time
+import xmlrpc.client
+import psycopg2, psycopg2.extras
+from typing import Optional, Any
+
+class ToolGateway:
+    def __init__(self):
+        url = "http://localhost:8069"
+        db, user, pw = "odoo_research", "admin", "admin"
+        common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
+        self.uid = common.authenticate(db, user, pw, {})
+        self.odoo = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
+        self._rpc = (db, self.uid, pw)
+
+        self.pg = psycopg2.connect(
+            host="localhost", port=5432,
+            dbname="odoo_research",
+            user="odoo", password="odoo_pw"
+        )
+        self._init_tables()
+
+    def execute(self, tool_name: str, parameters: dict,
+                claim_pre: Optional[str] = None,
+                step_id: int = 0,
+                trajectory_id: str = "") -> dict:
+
+        # ── ① 记录执行开始时间戳（纳秒精度）─────────────────
+        # 不再 SELECT *，只记一个时间点
+        t_start = self._now_pg()   # 从 PG 拿服务器时间，避免时钟偏差
+        t0 = time.time()
+
+        # ── ② 执行工具 ────────────────────────────────────────
+        try:
+            result = self._dispatch(tool_name, parameters)
+            return_value = {"status": "success", "data": result}
+        except Exception as e:
+            return_value = {"status": "error", "message": str(e)}
+
+        t_end = self._now_pg()
+
+        # ── ③ 捞 trigger 记录的变更（只拿这段时间内的）────────
+        # 不 diff，直接读 trigger 写好的结果
+        changes = self._fetch_changes(t_start, t_end)
+
+        # ── ④ 把 changes 转成你框架需要的 state_delta 格式 ────
+        delta = self._format_delta(changes)
+
+        # ── ⑤ 写 audit log ───────────────────────────────────
+        audit_id = self._write_audit(
+            step_id=step_id,
+            trajectory_id=trajectory_id,
+            tool_name=tool_name,
+            parameters=parameters,
+            return_value=return_value,
+            state_delta=delta,
+            raw_changes=changes,
+            claim_pre=claim_pre,
+            duration_ms=int((time.time() - t0) * 1000)
+        )
+
+        return {
+            **return_value,
+            "audit_id": audit_id,
+            "delta": delta,
+        }
+
+    def _now_pg(self) -> str:
+        """从 PostgreSQL 服务器拿当前时间，保证和 trigger 时钟一致"""
+        with self.pg.cursor() as cur:
+            cur.execute("SELECT NOW()::TEXT")
+            return cur.fetchone()[0]
+
+    def _fetch_changes(self, t_start: str, t_end: str) -> list[dict]:
+        """
+        直接读 trigger 已经写好的变更记录。
+        完全不需要 diff，trigger 已经帮你算好 OLD/NEW。
+        """
+        with self.pg.cursor(
+            cursor_factory=psycopg2.extras.RealDictCursor
+        ) as cur:
+            cur.execute("""
+                SELECT
+                    table_name,
+                    operation,
+                    row_id,
+                    old_data,
+                    new_data,
+                    changed_fields,
+                    occurred_at
+                FROM env_change_log
+                WHERE occurred_at >= %s::timestamptz
+                  AND occurred_at <= %s::timestamptz
+                ORDER BY occurred_at, id
+            """, (t_start, t_end))
+            return [dict(r) for r in cur.fetchall()]
+
+    def _format_delta(self, changes: list[dict]) -> dict:
+        """把 trigger 记录转成你 B_t 格式"""
+        delta = {}
+        for c in changes:
+            table = c["table_name"]
+            if table not in delta:
+                delta[table] = []
+            entry = {
+                "op":  c["operation"],
+                "id":  c["row_id"],
+                "at":  str(c["occurred_at"]),
+            }
+            if c["operation"] == "INSERT":
+                entry["row"] = c["new_data"]
+            elif c["operation"] == "DELETE":
+                entry["row"] = c["old_data"]
+            elif c["operation"] == "UPDATE":
+                # changed_fields 已经是 {"field": {"before": x, "after": y}}
+                # trigger 替你算好了，不用再 diff
+                entry["changed_fields"] = c["changed_fields"]
+            delta[table].append(entry)
+        return delta
+
+    def set_claim_post(self, audit_id: int, claim_post: str):
+        with self.pg.cursor() as cur:
+            cur.execute(
+                "UPDATE halluci_audit SET claim_post=%s WHERE id=%s",
+                (claim_post, audit_id)
+            )
+        self.pg.commit()
+
+    # ── Odoo 工具调用（不变）────────────────────────────────
+    def _dispatch(self, tool_name: str, params: dict) -> Any:
+        dispatch = {
+            "process_refund":    self._refund,
+            "cancel_order":      self._cancel_order,
+            "check_stock":       self._check_stock,
+            "update_inventory":  self._update_inventory,
+            "approve_leave":     self._approve_leave,
+            "create_ticket":     self._create_ticket,
+            "assign_ticket":     self._assign_ticket,
+            "close_ticket":      self._close_ticket,
+            "update_customer_tier": self._update_customer_tier,
+            "correct_attendance":   self._correct_attendance,
+        }
+        fn = dispatch.get(tool_name)
+        if not fn:
+            raise ValueError(f"Unknown tool: {tool_name}")
+        return fn(**params)
+
+    def _refund(self, order_id: int, amount: float,
+                reason: str = "") -> dict:
+        ref = self.odoo.execute_kw(
+            *self._rpc, "pos.order", "refund",
+            [[order_id]], {"reason": reason}
+        )
+        return {"refund_id": ref}
+
+    def _cancel_order(self, order_id: int) -> dict:
+        self.odoo.execute_kw(
+            *self._rpc, "pos.order", "write",
+            [[order_id]], {"state": "cancel"}
+        )
+        return {"cancelled": order_id}
+
+    def _check_stock(self, product_id: int) -> dict:
+        q = self.odoo.execute_kw(
+            *self._rpc, "stock.quant", "search_read",
+            [[["product_id", "=", product_id]]],
+            {"fields": ["quantity", "reserved_quantity"]}
+        )
+        return {"quants": q}
+
+    def _update_inventory(self, product_id: int,
+                           quantity: float) -> dict:
+        ids = self.odoo.execute_kw(
+            *self._rpc, "stock.quant", "search",
+            [[["product_id", "=", product_id]]]
+        )
+        self.odoo.execute_kw(
+            *self._rpc, "stock.quant", "write",
+            [ids], {"quantity": quantity}
+        )
+        return {"updated": ids, "qty": quantity}
+
+    def _approve_leave(self, leave_id: int) -> dict:
+        self.odoo.execute_kw(
+            *self._rpc, "hr.leave", "action_approve", [[leave_id]]
+        )
+        return {"leave_id": leave_id, "status": "approved"}
+
+    def _create_ticket(self, title: str,
+                        description: str = "",
+                        assignee_id: int = None) -> dict:
+        vals = {"name": title, "description": description}
+        if assignee_id:
+            vals["user_id"] = assignee_id
+        tid = self.odoo.execute_kw(
+            *self._rpc, "project.task", "create", [vals]
+        )
+        return {"ticket_id": tid}
+
+    def _assign_ticket(self, ticket_id: int,
+                        assignee_id: int) -> dict:
+        self.odoo.execute_kw(
+            *self._rpc, "project.task", "write",
+            [[ticket_id]], {"user_id": assignee_id}
+        )
+        return {"ticket_id": ticket_id, "assigned_to": assignee_id}
+
+    def _close_ticket(self, ticket_id: int,
+                       resolution: str = "") -> dict:
+        stage = self.odoo.execute_kw(
+            *self._rpc, "project.task.type", "search",
+            [[["name", "ilike", "done"]]], {"limit": 1}
+        )
+        self.odoo.execute_kw(
+            *self._rpc, "project.task", "write",
+            [[ticket_id]],
+            {"stage_id": stage[0] if stage else False,
+             "description": resolution}
+        )
+        return {"ticket_id": ticket_id, "status": "closed"}
+
+    def _update_customer_tier(self, partner_id: int,
+                               tier: str) -> dict:
+        self.odoo.execute_kw(
+            *self._rpc, "res.partner", "write",
+            [[partner_id]], {"category_id": [[4, tier]]}
+        )
+        return {"partner_id": partner_id, "tier": tier}
+
+    def _correct_attendance(self, employee_id: int,
+                             date: str,
+                             check_in: str,
+                             check_out: str) -> dict:
+        att_ids = self.odoo.execute_kw(
+            *self._rpc, "hr.attendance", "search",
+            [[["employee_id", "=", employee_id],
+              ["check_in", ">=", date]]]
+        )
+        if att_ids:
+            self.odoo.execute_kw(
+                *self._rpc, "hr.attendance", "write",
+                [att_ids],
+                {"check_in": check_in, "check_out": check_out}
+            )
+        return {"corrected": att_ids}
+
+    # ── Audit 表 ────────────────────────────────────────────
+    def _write_audit(self, **kw) -> int:
+        with self.pg.cursor() as cur:
+            cur.execute("""
+                INSERT INTO halluci_audit (
+                    step_id, trajectory_id, tool_name,
+                    parameters, return_value, state_delta,
+                    raw_changes, claim_pre, duration_ms
+                ) VALUES (
+                    %(step_id)s, %(trajectory_id)s, %(tool_name)s,
+                    %(parameters)s, %(return_value)s, %(state_delta)s,
+                    %(raw_changes)s, %(claim_pre)s, %(duration_ms)s
+                ) RETURNING id
+            """, {
+                **kw,
+                "parameters":   json.dumps(kw["parameters"],   default=str),
+                "return_value": json.dumps(kw["return_value"],  default=str),
+                "state_delta":  json.dumps(kw["state_delta"],   default=str),
+                "raw_changes":  json.dumps(kw["raw_changes"],   default=str),
+            })
+            row_id = cur.fetchone()[0]
+        self.pg.commit()
+        return row_id
+
+    def _init_tables(self):
+        with self.pg.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS halluci_audit (
+                    id             SERIAL PRIMARY KEY,
+                    step_id        INT,
+                    trajectory_id  TEXT,
+                    tool_name      TEXT,
+                    parameters     JSONB,
+                    return_value   JSONB,
+                    state_delta    JSONB,
+                    raw_changes    JSONB,
+                    claim_pre      TEXT,
+                    claim_post     TEXT,
+                    duration_ms    INT,
+                    created_at     TIMESTAMP DEFAULT NOW()
+                )
+            """)
+        self.pg.commit()
+
+第三步：在 Docker 容器里一键安装 triggers
+# 把 SQL 保存为 init_triggers.sql，然后：
+docker exec -i odoo-research-db-1 \
+    psql -U odoo -d odoo_research \
+    < init_triggers.sql
+
+# 验证 trigger 已经挂上
+docker exec -it odoo-research-db-1 \
+    psql -U odoo -d odoo_research \
+    -c "SELECT tgname, tgrelid::regclass FROM pg_trigger WHERE tgname LIKE 'trg_%';"
+
+
+四、两种方案的核心区别
+旧方案（SELECT * diff）          新方案（PG trigger）
+─────────────────────────────────────────────────────
+执行前: SELECT * FROM pos_order  执行前: 记一个时间戳 t_start
+执行工具                          执行工具
+执行后: SELECT * FROM pos_order  执行后: 记时间戳 t_end
+Python 比较两个大列表             SELECT FROM env_change_log
+                                  WHERE occurred_at BETWEEN t_start AND t_end
+
+问题: O(n) 内存，全表比对         结果: 只返回真正变化的行
+      漏掉并发写入                      OLD/NEW 由 DB 原子捕获
+      数据量大时很慢                     零内存开销，精确到毫秒
+
+Trigger 方案里你的 Gateway 代码变得非常简单：执行前记时间，执行后捞 log，完全不做 diff。 所有脏活都交给 PostgreSQL 在数据库层做了，而且是原子的、精确的。

@@ -1,0 +1,121 @@
+from dataclasses import dataclass, asdict
+from typing import Any
+import json, time, copy
+from sqlalchemy import text
+
+@dataclass
+class BehavioralRecord:
+    step_id: int
+    timestamp: float
+    tool_name: str
+    parameters: dict
+    return_value: Any
+    env_state_before: dict   # snapshot of relevant tables
+    env_state_after: dict    # snapshot after execution
+    env_state_delta: dict    # computed diff
+    agent_claim_pre: str | None   # c_t^pre from verbal output
+    agent_claim_post: str | None  # c_t^post from verbal output
+
+class ToolGateway:
+    def __init__(self, db_session, audit_logger):
+        self.db = db_session
+        self.logger = audit_logger
+        self.step_counter = 0
+        self._tool_registry = {}
+
+    def register_tool(self, fn):
+        """Decorator to register a tool function"""
+        self._tool_registry[fn.__name__] = fn
+        return fn
+
+    def execute(self, tool_name: str, parameters: dict, 
+                claim_pre: str = None) -> dict:
+        """
+        Execute a tool call and produce a full B_t record.
+        This is called by the agent harness, NOT directly by the agent.
+        """
+        self.step_counter += 1
+        
+        # 1. Snapshot state BEFORE
+        state_before = self._snapshot_state(tool_name, parameters)
+        
+        # 2. Execute
+        t0 = time.time()
+        try:
+            result = self._tool_registry[tool_name](**parameters)
+            return_value = {"status": "success", "data": result}
+        except Exception as e:
+            return_value = {"status": "error", "error": str(e)}
+        
+        # 3. Snapshot state AFTER
+        state_after = self._snapshot_state(tool_name, parameters)
+        delta = self._compute_delta(state_before, state_after)
+        
+        # 4. Persist B_t record
+        record = BehavioralRecord(
+            step_id=self.step_counter,
+            timestamp=t0,
+            tool_name=tool_name,
+            parameters=parameters,
+            return_value=return_value,
+            env_state_before=state_before,
+            env_state_after=state_after,
+            env_state_delta=delta,
+            agent_claim_pre=claim_pre,
+            agent_claim_post=None  # filled in after agent responds
+        )
+        self.logger.log_record(record)
+        return return_value
+
+    def _snapshot_state(self, tool_name: str, params: dict) -> dict:
+        """Query relevant DB tables based on tool type"""
+        # Tool-specific state capture
+        relevant_tables = TOOL_STATE_MAP.get(tool_name, [])
+        snapshot = {}
+        for table in relevant_tables:
+            rows = self.db.execute(text(f"SELECT * FROM {table}")).fetchall()
+            snapshot[table] = [dict(r) for r in rows]
+        return snapshot
+
+    def _compute_delta(self, before: dict, after: dict) -> dict:
+        """Compute row-level diffs between snapshots"""
+        delta = {}
+        for table in set(before) | set(after):
+            b_rows = {r['id']: r for r in before.get(table, [])}
+            a_rows = {r['id']: r for r in after.get(table, [])}
+            changes = []
+            for rid in set(b_rows) | set(a_rows):
+                if rid not in b_rows:
+                    changes.append({"op": "INSERT", "row": a_rows[rid]})
+                elif rid not in a_rows:
+                    changes.append({"op": "DELETE", "row": b_rows[rid]})
+                elif b_rows[rid] != a_rows[rid]:
+                    changes.append({
+                        "op": "UPDATE", 
+                        "before": b_rows[rid], 
+                        "after": a_rows[rid]
+                    })
+            if changes:
+                delta[table] = changes
+        return delta
+```
+
+---
+
+## Part 4: Recommended Scenario — Enterprise Work Order + CRM System
+
+Rather than building 5 separate systems, I'd recommend a **single unified "enterprise assistant" scenario** that naturally encompasses all the halluci-action-rich domains. Here's a concrete proposal:
+
+### "CorpAssist" — Unified Sandbox System
+
+**Domain model: A mid-size company's internal operations assistant**
+```
+Tables / Modules:
+├── customers          (CRM: id, name, contact, tier, history)
+├── orders             (POS/Retail: id, customer_id, items, status, amount)
+├── work_orders        (ITSM: id, assignee, priority, status, due_date)
+├── employees          (HR: id, name, department, manager_id)
+├── attendance_logs    (OA: employee_id, date, check_in, check_out, status)
+├── inventory          (Warehouse: sku, quantity, location, reorder_threshold)
+├── approvals          (Workflow: request_id, type, requester, status, approver)
+└── audit_log          (B_t records: all of the above)

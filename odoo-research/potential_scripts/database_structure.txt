@@ -1,0 +1,99 @@
+# Odoo Database Structure for Halluci-Action Research
+# These are actual Odoo PostgreSQL tables used by the research harness
+
+Tables / Modules:
+
+## CRM / Customer Management
+├── res_partner                           (CRM: id, name, email, phone, mobile, company_type, customer_rank, category_id, comment)
+├── res_partner_category                  (CRM Tags: id, name - used for tier labels like "Tier:gold")
+├── res_partner_res_partner_category_rel  (CRM M2M: partner_id, category_id)
+├── crm_lead                              (CRM Opportunities: id, name, probability, stage_id, expected_revenue)
+├── mail_message                          (Messaging: id, model, res_id, body, message_type, subject)
+
+## POS / Orders
+├── pos_order                             (POS: id, name, partner_id, state, date_order, amount_total, amount_paid, amount_tax, session_id, lines)
+├── pos_order_line                        (POS Lines: id, product_id, qty, price_unit, discount, price_subtotal_incl)
+├── sale_order                            (Sales: id, name, partner_id, state, amount_total, opportunity_id, note, order_line)
+├── sale_order_line                       (Sales Lines: id, product_id, product_uom_qty, price_unit)
+├── account_move                          (Accounting: id - used for refund tracking)
+
+## Inventory / Warehouse
+├── stock_quant                           (Stock: id, product_id, location_id, quantity, reserved_quantity, inventory_quantity)
+├── stock_move                            (Stock Moves: id, name, product_id, product_uom_qty, quantity_done, location_id, location_dest_id)
+├── stock_move_line                       (Move Lines: detailed move tracking)
+├── stock_picking                         (Transfers: id, name, state, picking_type_id, location_id, location_dest_id, move_ids_without_package, origin)
+├── stock_warehouse_orderpoint            (Reorder Rules: id, product_id, location_id, product_min_qty, product_max_qty, qty_multiple, qty_on_hand, qty_forecast)
+├── stock_location                        (Locations: id, complete_name, usage)
+├── stock_picking_type                    (Picking Types: id, code)
+├── product_product                       (Products: id, display_name, uom_id)
+
+## HR / Attendance
+├── hr_employee                           (HR: id, name, work_email, work_phone, department_id, parent_id, job_title, company_id, user_id)
+├── hr_attendance                         (Attendance: id, employee_id, check_in, check_out, worked_hours)
+├── hr_leave                              (Leave Requests: id, name, state, employee_id)
+
+## Helpdesk / Support
+├── helpdesk_ticket                       (Helpdesk: id, name, description, priority, stage_id, partner_id, user_id, team_id) [if installed]
+├── helpdesk_stage                        (Helpdesk Stages: id, name, is_close, fold) [if installed]
+├── project_task                          (Project Tasks: id, name, description, priority, stage_id, project_id, user_ids, partner_id, active) [fallback]
+├── project_task_type                     (Task Stages: id, name, fold)
+├── project_project                       (Projects: id, name)
+
+## Audit / Research
+└── halluci_audit                         (B_t Records: id, step_id, trajectory_id, timestamp, tool_name, parameters, return_value,
+                                           state_before, state_after, state_delta, claim_pre, claim_post, duration_ms)
+
+---
+
+# Tool-to-Table Mapping (from gateway.py TOOL_TABLE_MAP)
+
+Tool Name             | Tables Monitored
+----------------------|------------------
+get_order             | pos_order, pos_order_line
+process_refund        | pos_order, account_move
+cancel_order          | pos_order
+update_order_status   | pos_order
+apply_discount        | pos_order, pos_order_line
+get_customer          | res_partner, res_partner_category, res_partner_res_partner_category_rel
+update_customer_tier  | res_partner, res_partner_category, res_partner_res_partner_category_rel
+log_interaction       | mail_message
+send_quote            | sale_order, sale_order_line
+mark_opportunity_won  | crm_lead
+check_stock           | stock_quant
+update_inventory      | stock_quant, stock_move
+transfer_stock        | stock_picking, stock_move, stock_move_line
+trigger_reorder       | stock_warehouse_orderpoint
+get_low_stock_items   | stock_warehouse_orderpoint
+get_attendance        | hr_attendance
+correct_attendance    | hr_attendance
+approve_leave         | hr_leave
+reject_leave          | hr_leave, mail_message
+get_employee_info     | hr_employee
+create_ticket         | helpdesk_ticket, project_task
+assign_ticket         | helpdesk_ticket, project_task
+close_ticket          | helpdesk_ticket, project_task
+escalate_ticket       | helpdesk_ticket, project_task, mail_message
+get_open_tickets      | helpdesk_ticket, project_task
+
+---
+
+# halluci_audit Table Schema (created by gateway.py)
+
+CREATE TABLE IF NOT EXISTS halluci_audit (
+    id             BIGSERIAL PRIMARY KEY,
+    step_id        INTEGER NOT NULL,
+    trajectory_id  TEXT NOT NULL,
+    timestamp      TIMESTAMPTZ NOT NULL,
+    tool_name      TEXT NOT NULL,
+    parameters     JSONB NOT NULL,
+    return_value   JSONB NOT NULL,
+    state_before   JSONB NOT NULL,
+    state_after    JSONB NOT NULL,
+    state_delta    JSONB NOT NULL,
+    claim_pre      TEXT,
+    claim_post     TEXT,
+    duration_ms    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_halluci_audit_trajectory_step
+    ON halluci_audit (trajectory_id, step_id, id);
