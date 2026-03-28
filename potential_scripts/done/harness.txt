@@ -1,0 +1,159 @@
+# research/harness.py  —— 核心实验循环，展示完整日志流
+
+import json, time, uuid
+from pathlib import Path
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+from response_parser import ResponseParser, ParsedTurn
+from gateway import ToolGateway
+
+@dataclass
+class StepRecord:
+    step_id:        int
+    timestamp:      float
+    # ── Agent 侧（API 返回的） ──────────────────────────────
+    raw_response:   dict        # 完整原始 JSON，永久保存
+    cot_text:       Optional[str]   # DeepSeek/Claude extended 的推理
+    claim_pre:      Optional[str]   # tool call 前的 NL 声明
+    claim_post:     Optional[str]   # tool call 后的 NL 声明（下一轮填）
+    # ── Tool 侧（Odoo 执行的） ─────────────────────────────
+    tool_name:      Optional[str]   = None
+    tool_params:    dict            = field(default_factory=dict)
+    tool_result:    dict            = field(default_factory=dict)
+    state_before:   dict            = field(default_factory=dict)
+    state_after:    dict            = field(default_factory=dict)
+    state_delta:    dict            = field(default_factory=dict)
+
+class ExperimentRunner:
+    def __init__(self, agent, gateway: ToolGateway, 
+                 save_dir: str = "experiments/runs"):
+        self.agent = agent
+        self.gateway = gateway
+        self.parser = ResponseParser()
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+
+    def run(self, task_prompt: str, max_steps: int = 15) -> dict:
+        trajectory_id = str(uuid.uuid4())[:8]
+        messages = [{"role": "user", "content": task_prompt}]
+        steps = []
+        step_id = 0
+        prev_turn: Optional[ParsedTurn] = None
+
+        print(f"\n{'='*60}")
+        print(f"Trajectory: {trajectory_id}")
+        print(f"Task: {task_prompt[:80]}...")
+        print(f"{'='*60}")
+
+        for _ in range(max_steps):
+            step_id += 1
+
+            # ── 1. 调 agent API ───────────────────────────────
+            raw_resp = self.agent.run_turn(messages)
+            turn = self.parser.parse(raw_resp, self.agent.provider)
+
+            # ── 2. 填上一步的 claim_post ─────────────────────
+            if prev_turn and steps:
+                # 上一步 tool call 之后，agent 这一轮开头的 text 就是 claim_post
+                steps[-1].claim_post = self._extract_post_claim(
+                    turn.full_text
+                )
+                # 同步写入数据库
+                self.gateway.set_claim_post(
+                    steps[-1].step_id,
+                    steps[-1].claim_post
+                )
+
+            # ── 3. 打印本轮摘要 ──────────────────────────────
+            print(f"\n[Step {step_id}]")
+            if turn.cot_text:
+                print(f"  CoT: {turn.cot_text[:120]}...")
+            if turn.claim_pre:
+                print(f"  claim_pre: {turn.claim_pre}")
+            if turn.tool_calls:
+                for tc in turn.tool_calls:
+                    print(f"  TOOL: {tc.tool_name}({tc.parameters})")
+
+            # ── 4. 执行 tool calls，记录 B_t ─────────────────
+            tool_results = []
+            step_record = StepRecord(
+                step_id=step_id,
+                timestamp=time.time(),
+                raw_response=raw_resp,
+                cot_text=turn.cot_text,
+                claim_pre=turn.claim_pre,
+                claim_post=None  # 下一轮填
+            )
+
+            for tc in turn.tool_calls:
+                # ToolGateway 负责: snapshot → execute → snapshot → log
+                result = self.gateway.execute(
+                    tool_name=tc.tool_name,
+                    parameters=tc.parameters,
+                    claim_pre=turn.claim_pre,
+                    step_id=step_id,
+                    trajectory_id=trajectory_id
+                )
+                print(f"  RESULT: {result['status']} "
+                      f"| delta: {json.dumps(result.get('delta', {}))[:80]}")
+
+                step_record.tool_name    = tc.tool_name
+                step_record.tool_params  = tc.parameters
+                step_record.tool_result  = result
+                step_record.state_before = result.get("state_before", {})
+                step_record.state_after  = result.get("state_after", {})
+                step_record.state_delta  = result.get("delta", {})
+                tool_results.append({
+                    "tool_call_id": tc.call_id,
+                    "role": "tool",
+                    "content": json.dumps(result)
+                })
+
+            steps.append(step_record)
+            prev_turn = turn
+
+            # ── 5. 更新 message history ──────────────────────
+            messages.append({"role": "assistant", "content": turn.full_text,
+                              "tool_calls": [
+                                  {"id": tc.call_id, "type": "function",
+                                   "function": {"name": tc.tool_name,
+                                                "arguments": json.dumps(tc.parameters)}}
+                                  for tc in turn.tool_calls
+                              ] or None})
+            messages.extend(tool_results)
+
+            # ── 6. 判断是否完成 ──────────────────────────────
+            if not turn.tool_calls:
+                print(f"\n  [Done — no more tool calls]")
+                break
+
+        # ── 7. 保存完整 trajectory 到 JSON 文件 ──────────────
+        output = {
+            "trajectory_id": trajectory_id,
+            "agent": self.agent.provider,
+            "model": self.agent.model,
+            "task": task_prompt,
+            "n_steps": len(steps),
+            "steps": [asdict(s) for s in steps]
+        }
+        out_path = self.save_dir / f"{trajectory_id}.json"
+        out_path.write_text(json.dumps(output, indent=2, default=str))
+        print(f"\nSaved to {out_path}")
+
+        return output
+
+    def _extract_post_claim(self, text: str) -> Optional[str]:
+        """从 agent 下一轮开头的文本提取 claim_post"""
+        if not text:
+            return None
+        patterns = [
+            r"(?:The \w+ has been|I have|Successfully|Done)[^.!?]+[.!?]",
+            r"\w+ (?:has been|have been|was) [^.!?]+[.!?]",
+        ]
+        import re
+        for p in patterns:
+            m = re.search(p, text, re.IGNORECASE)
+            if m:
+                return m.group(0).strip()
+        # fallback: 第一句
+        return text.split('.')[0].strip() + '.' if text else None

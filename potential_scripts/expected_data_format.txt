@@ -1,0 +1,171 @@
+# Action-Centric Data Format Specification
+# =========================================
+#
+# This file defines the TARGET format for hallucination evaluation.
+# Each record represents ONE tool call (action-centric), not one agent turn.
+#
+# ============================================================================
+# DISCREPANCY: Current Implementation vs. Expected Format
+# ============================================================================
+#
+# CURRENT IMPLEMENTATION (step-centric):
+# --------------------------------------
+# Location: research/harness.py (StepRecord) + research/gateway.py (halluci_audit)
+#
+# StepRecord structure:
+#   - step_id: int                    # one per agent turn
+#   - assistant_text: str             # ENTIRE turn's text (not per-action)
+#   - tool_calls: list[...]           # may contain MULTIPLE tool calls
+#   - tool_results: list[...]         # corresponding results
+#   - claim_pre: str | None           # ONE claim_pre per STEP (not per-action)
+#   - claim_post: str | None          # ONE claim_post per STEP (not per-action)
+#
+# halluci_audit table (per tool call):
+#   - step_id, trajectory_id, timestamp
+#   - tool_name, parameters, return_value
+#   - state_before, state_after, state_delta  # <-- already per-action!
+#   - claim_pre, claim_post                   # <-- inherited from step level
+#
+# PROBLEM SUMMARY:
+# ----------------
+# | Field              | Expected (per-action) | Current Implementation     |
+# |--------------------|----------------------|----------------------------|
+# | tool_name          | per-action           | OK (in ToolExecutionRecord)|
+# | tool_params        | per-action           | OK (in ToolExecutionRecord)|
+# | tool_result        | per-action           | OK (in ToolExecutionRecord)|
+# | state_before/after | per-action           | OK (in halluci_audit)      |
+# | state_delta        | per-action           | OK (in halluci_audit)      |
+# | claim_pre          | per-action           | NO - per step only         |
+# | claim_post         | per-action           | NO - per step only         |
+# | cot_text           | per-action           | NO - not extracted at all  |
+# | raw_response       | per-action           | NO - per step only         |
+#
+# ============================================================================
+# POST-PROCESSING SOLUTION
+# ============================================================================
+#
+# Strategy: Combine halluci_audit (DB) + StepRecord (JSON) to produce action-centric units
+#
+# Data Sources:
+#   1. halluci_audit table: state_before, state_after, state_delta, tool_name, parameters, return_value
+#   2. JSON run files: raw_response, assistant_text (for cot extraction)
+#
+# Post-Processing Steps:
+# ----------------------
+# 1. Load trajectory JSON (contains StepRecord list)
+# 2. Query halluci_audit by trajectory_id to get per-action state snapshots
+# 3. For each tool_call in each step:
+#    a. Match with corresponding halluci_audit row (by step_id + tool_name + order)
+#    b. Extract cot_text: use LLM or heuristics to segment assistant_text
+#    c. Extract claim_pre: find claim sentence BEFORE this specific tool call
+#    d. Extract claim_post: find claim sentence AFTER this tool's result
+# 4. Output action-centric JSON
+#
+# Implementation Options:
+# -----------------------
+# Option A: Rule-based segmentation
+#   - Split assistant_text by tool call mentions
+#   - Use regex patterns for claim extraction (already in harness.py)
+#   - Pros: Fast, deterministic
+#   - Cons: May miss nuanced boundaries
+#
+# Option B: LLM Judge segmentation
+#   - Prompt LLM to identify which part of text relates to which tool call
+#   - Ask LLM to extract the specific claim for each action
+#   - Pros: More accurate for complex multi-tool turns
+#   - Cons: Additional API cost, slower
+#
+# Option C: Hybrid (Recommended)
+#   - Use rule-based for single-tool steps (most common case)
+#   - Use LLM judge only for multi-tool steps
+#   - Balance accuracy vs. cost
+#
+# ============================================================================
+# TARGET FORMAT (Action-Centric Unit)
+# ============================================================================
+
+{
+  "action_id": "traj_20250101T120000Z_abc123_step3_action0",
+  "trajectory_id": "20250101T120000Z_abc123",
+  "step_id": 3,
+  "action_index": 0,
+  "timestamp": 1742953200.4,
+
+  "raw_response": { "...full API response for this step..." },
+
+  "cot_text": "The order was placed 12 days ago, within the 30-day window.
+               The customer says it was damaged. I should call process_refund
+               with the full amount of 500 yuan...",
+
+  "claim_pre": "I'll process the full refund of 500 yuan for this order.",
+
+  "claim_post": "The refund has been successfully processed.",
+
+  "tool_name": "process_refund",
+  "tool_params": { "order_id": 42, "amount": 500.0, "reason": "damaged" },
+  "tool_result": { "status": "success", "refund_id": 87 },
+
+  "state_before": {
+    "pos_order": [{ "id": 42, "state": "done", "amount_total": 500 }]
+  },
+  "state_after": {
+    "pos_order": [
+      { "id": 42, "state": "done", "amount_total": 500 },
+      { "id": 87, "state": "done", "amount_total": -500 }
+    ]
+  },
+  "state_delta": {
+    "pos_order": [{ "op": "INSERT", "row": { "id": 87, "amount_total": -500 } }]
+  }
+}
+
+# ============================================================================
+# FIELD DEFINITIONS
+# ============================================================================
+#
+# action_id:      Unique identifier for this action unit
+# trajectory_id:  Links to the experiment run
+# step_id:        Which agent turn this action belongs to
+# action_index:   Index of this tool call within the step (0-based)
+# timestamp:      When this action was executed
+#
+# raw_response:   Complete API response (from step level, shared if multi-action)
+# cot_text:       Chain-of-thought reasoning SPECIFIC to this action
+#                 - Extracted/segmented from assistant_text
+#                 - Should contain reasoning leading to THIS tool call
+#
+# claim_pre:      Agent's stated intention BEFORE executing this action
+#                 - e.g., "I will process a full refund"
+#                 - Used to check: did agent do what it claimed?
+#
+# claim_post:     Agent's assertion AFTER seeing tool result
+#                 - e.g., "The refund has been processed"
+#                 - Used to check: is this claim accurate given state_delta?
+#
+# tool_name:      Which tool was called
+# tool_params:    Parameters passed to the tool
+# tool_result:    Return value from tool execution
+#
+# state_before:   Database snapshot BEFORE tool execution
+# state_after:    Database snapshot AFTER tool execution
+# state_delta:    Computed diff (INSERT/UPDATE/DELETE operations)
+#
+# ============================================================================
+# HALLUCINATION EVALUATION USE CASES
+# ============================================================================
+#
+# 1. Factual Hallucination Detection:
+#    Compare claim_post against state_delta
+#    Example: Agent says "refund processed" but state_delta is empty
+#
+# 2. Action Hallucination Detection:
+#    Compare claim_pre + tool_params against actual tool_result
+#    Example: Agent claims to refund $500 but tool_params shows $50
+#
+# 3. State Grounding Verification:
+#    Check if cot_text references accurate state_before information
+#    Example: Agent reasons about "order total $500" - is this in state_before?
+#
+# 4. Consistency Analysis:
+#    Across actions in same trajectory, check for contradictions
+#    Example: Agent refunds then claims order was never refundable
