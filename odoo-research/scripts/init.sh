@@ -110,17 +110,17 @@ if ! crun python -c "import odoo" &>/dev/null 2>&1; then
 
     # setuptools>=70 removed pkg_resources from the default namespace;
     # Odoo 17 imports it directly, so we need a compatible setuptools version.
-    crun pip install --cache-dir /data2/jl14087/pip-cache "setuptools<70"
+    crun pip install --cache-dir /scratch/cl7990/pip-cache "setuptools<70"
 
     log "Installing remaining Odoo Python requirements via pip"
-    crun pip install --cache-dir /data2/jl14087/pip-cache \
+    crun pip install --cache-dir /scratch/cl7990/pip-cache \
         -r "$FILTERED_REQ"
 
     # lxml>=5 split lxml.html.clean into a separate package; install it now.
-    crun pip install --cache-dir /data2/jl14087/pip-cache lxml_html_clean
+    crun pip install --cache-dir /scratch/cl7990/pip-cache lxml_html_clean
 
     log "Installing Odoo package (editable, --no-deps skips re-checking versions)"
-    crun pip install --cache-dir /data2/jl14087/pip-cache \
+    crun pip install --cache-dir /scratch/cl7990/pip-cache \
         --no-deps \
         -e "$ODOO_SRC_DIR"
 else
