@@ -37,7 +37,7 @@ class AgentConfig:
     model: str
     api_key: str
     base_url: str | None = None
-    temperature: float = 0.7
+    temperature: float = 0
     max_tokens: int = 2000
     system_prompt: str = ""
     knowledge_level: str = "KL1"

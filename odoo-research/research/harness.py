@@ -87,7 +87,7 @@ class ExperimentRunner:
         api_key: str | None,
         n_runs: int = 1,
         base_url: str | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0,
         max_tokens: int = 2000,
         max_steps: int | None = None,
         task_system_prompt: str | None = None,
@@ -352,7 +352,7 @@ def cli() -> None:
 @click.option("--runs", "n_runs", default=1, show_default=True, type=int)
 @click.option("--api-key", default=None, help="Override provider API key.")
 @click.option("--base-url", default=None, help="Override OpenAI-compatible base URL.")
-@click.option("--temperature", default=0.7, show_default=True, type=float)
+@click.option("--temperature", default=0, show_default=True, type=float)
 @click.option("--max-tokens", default=2000, show_default=True, type=int)
 @click.option("--max-steps", default=15, show_default=True, type=int)
 @click.option("--odoo-url", default=None)
