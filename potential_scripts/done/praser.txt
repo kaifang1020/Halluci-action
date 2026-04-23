@@ -1,0 +1,148 @@
+
+# research/response_parser.py
+
+import json, re
+from dataclasses import dataclass, field
+from typing import Optional
+
+@dataclass
+class ParsedTurn:
+    """一个 agent turn 解析出来的所有信息"""
+    raw_response:   dict                    # 原始 API 返回，完整保存
+    cot_text:       Optional[str] = None    # CoT (DeepSeek R1 / Claude extended)
+    claim_pre:      Optional[str] = None    # tool call 之前的 NL 声明
+    claim_post:     Optional[str] = None    # tool call 之后的 NL 声明 (下一轮)
+    tool_calls:     list = field(default_factory=list)  # 结构化 tool calls
+    full_text:      Optional[str] = None    # 全部纯文本
+
+@dataclass  
+class ToolCallParsed:
+    call_id:    str
+    tool_name:  str
+    parameters: dict
+
+class ResponseParser:
+    """统一解析各 provider 的 API response"""
+
+    def parse(self, response: dict, provider: str) -> ParsedTurn:
+        if provider == "anthropic":
+            return self._parse_claude(response)
+        else:
+            return self._parse_openai_compat(response)
+
+    # ─── Claude ───────────────────────────────────────────────
+    def _parse_claude(self, resp: dict) -> ParsedTurn:
+        turn = ParsedTurn(raw_response=resp)
+        text_parts = []
+        last_text_before_tool = None
+
+        for block in resp.get("content", []):
+            if block["type"] == "thinking":
+                turn.cot_text = block.get("thinking", "")
+
+            elif block["type"] == "text":
+                text = block.get("text", "").strip()
+                text_parts.append(text)
+                last_text_before_tool = text   # 更新，直到遇到 tool_use
+
+            elif block["type"] == "tool_use":
+                # 遇到 tool call，把刚才最后的 text 当 claim_pre
+                if last_text_before_tool:
+                    turn.claim_pre = self._extract_claim(
+                        last_text_before_tool, "pre"
+                    )
+                turn.tool_calls.append(ToolCallParsed(
+                    call_id=block["id"],
+                    tool_name=block["name"],
+                    parameters=block["input"]   # Claude 直接是 dict，无需 json.loads
+                ))
+                last_text_before_tool = None    # reset
+
+        turn.full_text = " ".join(text_parts)
+        return turn
+
+    # ─── OpenAI / DeepSeek / Qwen / Kimi ────────────────────
+    def _parse_openai_compat(self, resp: dict) -> ParsedTurn:
+        turn = ParsedTurn(raw_response=resp)
+        msg = resp["choices"][0]["message"]
+
+        # CoT (DeepSeek R1 专有字段)
+        if "reasoning_content" in msg and msg["reasoning_content"]:
+            turn.cot_text = msg["reasoning_content"]
+
+        # NL content
+        content = msg.get("content") or ""
+        turn.full_text = content
+        turn.claim_pre = self._extract_claim(content, "pre")
+
+        # Tool calls
+        for tc in msg.get("tool_calls") or []:
+            fn = tc["function"]
+            turn.tool_calls.append(ToolCallParsed(
+                call_id=tc["id"],
+                tool_name=fn["name"],
+                parameters=json.loads(fn["arguments"])  # 这里是字符串，要 parse
+            ))
+
+        return turn
+
+    # ─── Claim extraction (heuristic, TODO: LLM judge later) ─
+    def _extract_claim(self, text: str, position: str) -> Optional[str]:
+        if not text:
+            return None
+
+        if position == "pre":
+            # 找 Intention / Constraint 类型的 claim
+            patterns = [
+                r"I(?:'ll| will| am going to| won't| will not)\s+[^.!?]+[.!?]",
+                r"(?:Let me|I'll)\s+[^.!?]+[.!?]",
+                r"I(?:'m| am)\s+(?:going to|about to)\s+[^.!?]+[.!?]",
+            ]
+        else:  # post
+            # 找 Completion / State 类型的 claim
+            patterns = [
+                r"(?:The\s+\w+\s+has been|I have|Successfully)\s+[^.!?]+[.!?]",
+                r"(?:Done|Completed|Finished)[^.!?]*[.!?]",
+                r"\w+\s+(?:has been|have been|was|were)\s+[^.!?]+[.!?]",
+            ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(0).strip()
+
+        # fallback: 返回第一句话
+        sentences = re.split(r'[.!?]+', text)
+        return sentences[0].strip() if sentences else None
+```
+
+---
+
+## 四、Docker 日志能给你什么，不能给你什么
+
+你截图里看到的是 **Odoo application log**，这里能看到：
+```
+✅ 能看到的：
+   - Odoo 内部的 scheduled jobs（cron 任务）
+   - HTTP request logs（谁访问了哪个端点）
+   - Python exceptions（如果 agent 调用出错）
+   - module install/uninstall 记录
+
+❌ 看不到的：
+   - 具体的 SQL 语句（默认不开启）
+   - field-level 的数据变更
+   - agent 的 verbal output
+   - B_t 的 state_delta
+
+
+   要看 SQL 操作，需要在 PostgreSQL 容器里单独开启日志：
+yaml# docker-compose.yml 里给 db 加上这些参数
+db:
+  image: postgres:15
+  command: >
+    postgres
+    -c log_statement=all
+    -c log_min_duration_statement=0
+    -c log_destination=stderr
+
+

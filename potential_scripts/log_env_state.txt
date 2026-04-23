@@ -1,0 +1,37 @@
+1. PostgreSQL 后端 = BtB_t
+Bt​ 自动产生
+
+每一个 Odoo 业务操作最终都落到 PostgreSQL 的一次 INSERT / UPDATE / DELETE 上。你的 env_state_delta 不需要额外开发——直接查表就是。
+sql-- 查看某个 stock_move 记录的变更历史
+SELECT *
+FROM stock_move
+WHERE write_date > NOW() - INTERVAL '10 minutes'
+ORDER BY write_date DESC;
+
+-- 或者开启 pg_audit 插件，得到完整的 WAL-level 操作日志
+
+
+2. 统一 ORM 模型 = tool_name 和 parameters 天然结构化
+Odoo 所有外部操作都通过 JSON-RPC 的 execute_kw 方法调用，格式是固定的：
+# Agent 调用一个 "处理退款" 工具，底层是：
+models.execute_kw(db, uid, password,
+    'pos.order',      # model name = tool_name
+    'refund',         # method = action type  
+    [[order_id]],     # args = parameters
+    {'reason': 'damaged item'}  # kwargs = key parameters
+)
+这个结构正好对应你 Definition 2 的 verifiability score 的评估：tool_name 是 action type，kwargs 是 key parameters，v(c) = 1 的条件完全可以自动判断。
+3. 内置 mail.tracking.value 和 OCA audit log = BtB_t
+Bt​ 记录开箱即用
+
+Odoo 本身有两层变更追踪：
+机制表名记录内容粒度Chatter trackingmail.tracking.value字段级别的 old_value → new_value字段级OCA auditlog moduleauditlog.log + auditlog.log.linemodel · method · user · timestamp · field changes操作级PostgreSQL WALpg_logical / pgauditSQL 语句级别SQL级
+安装 OCA 的 auditlog 模块后，对任意 model 设置 audit rule，它就会自动记录每次 create/write/unlink 的完整字段变化，不需要你写一行代码。这直接给你 env_state_before 和 env_state_after。
+
+
+
+also 这个怎么办，要装吗？
+默认 audit log 不够细需要安装 OCA auditlog 并手动配置 rules2 小时内可完成配置
+
+这个是什么？
+没有开箱即用的 "agent harness"需要自己写 multi-turn 循环和 claim 提取用 LangChain / LlamaIndex tool wrapper
