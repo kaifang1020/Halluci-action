@@ -16,6 +16,7 @@ PROVIDER_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
     "qwen": "DASHSCOPE_API_KEY",
     "kimi": "MOONSHOT_API_KEY",
 }
@@ -26,6 +27,7 @@ PROVIDER_ALIASES = {
 
 PROVIDER_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
+    "gemini": "https://ai-gateway.apps.cloud.rt.nyu.edu/v1",
     "qwen": "https://dashscope.aliyuncs.com/compatible/v1",
     "kimi": "https://api.moonshot.cn/v1",
 }
@@ -37,7 +39,7 @@ class AgentConfig:
     model: str
     api_key: str
     base_url: str | None = None
-    temperature: float = 0.7
+    temperature: float = 0.0
     max_tokens: int = 2000
     system_prompt: str = ""
     knowledge_level: str = "KL1"
@@ -109,7 +111,7 @@ def build_agent_config(
     knowledge_level: str,
     api_key: str | None = None,
     base_url: str | None = None,
-    temperature: float = 0.7,
+    temperature: float = 0.0,
     max_tokens: int = 2000,
 ) -> AgentConfig:
     normalized_provider = normalize_provider(provider)

@@ -11,7 +11,7 @@ from typing import Any
 import click
 import structlog
 
-from research.agents import AnthropicAgent, DeepSeekAgent, KimiAgent, OpenAIAgent, QwenAgent
+from research.agents import AnthropicAgent, DeepSeekAgent, GeminiAgent, KimiAgent, OpenAIAgent, QwenAgent
 from research.config import (
     ExperimentConfig,
     OdooConfig,
@@ -233,6 +233,8 @@ class ExperimentRunner:
             return OpenAIAgent(config)
         if provider == "deepseek":
             return DeepSeekAgent(config)
+        if provider == "gemini":
+            return GeminiAgent(config)
         if provider == "qwen":
             return QwenAgent(config)
         if provider == "kimi":
@@ -338,6 +340,32 @@ def configure_logging() -> None:
     )
 
 
+def print_task_listing(domain: str | None = None, difficulty: str | None = None) -> None:
+    """Print task registry entries in a compact, filterable format."""
+    task_infos = list_tasks(domain=domain, difficulty=difficulty)
+    click.echo("\nPredefined Halluci-Action Task Scenarios")
+    click.echo(f"Source: research.tasks.TASKS ({len(TASKS)} total)")
+    if domain or difficulty:
+        click.echo(f"Filters: domain={domain or '*'}, difficulty={difficulty or '*'}")
+    click.echo(f"Shown: {len(task_infos)}")
+    click.echo("=" * 96)
+
+    if not task_infos:
+        click.echo("No tasks match the requested filters.")
+        return
+
+    for task_info in task_infos:
+        click.echo(
+            f"{task_info['id']:6s} "
+            f"{task_info.get('domain', ''):15s} "
+            f"{task_info.get('difficulty', ''):14s} "
+            f"{task_info['name']}"
+        )
+        click.echo(f"       {task_info['description']}")
+        click.echo(f"       Target HA types: {', '.join(task_info['target_ha_types'])}")
+    click.echo("=" * 96)
+
+
 @click.group()
 def cli() -> None:
     configure_logging()
@@ -347,12 +375,12 @@ def cli() -> None:
 @click.option("--agent", "agent_name", required=True, help="anthropic|openai|deepseek|qwen|kimi")
 @click.option("--model", "model_name", required=True)
 @click.option("--task", "task_prompt", default=None, help="Direct task prompt text")
-@click.option("--task-id", default=None, help="Predefined task ID (task1-task6). Use 'list' to see all.")
+@click.option("--task-id", default=None, help="Task ID from research.tasks.TASKS. Use 'list' to see all.")
 @click.option("--kl", "knowledge_level", default="KL1", show_default=True)
 @click.option("--runs", "n_runs", default=1, show_default=True, type=int)
 @click.option("--api-key", default=None, help="Override provider API key.")
 @click.option("--base-url", default=None, help="Override OpenAI-compatible base URL.")
-@click.option("--temperature", default=0.7, show_default=True, type=float)
+@click.option("--temperature", default=0.0, show_default=True, type=float)
 @click.option("--max-tokens", default=2000, show_default=True, type=int)
 @click.option("--max-steps", default=15, show_default=True, type=int)
 @click.option("--odoo-url", default=None)
@@ -364,6 +392,8 @@ def cli() -> None:
 @click.option("--pg-database", default=None)
 @click.option("--pg-user", default=None)
 @click.option("--pg-password", default=None)
+@click.option("--no-codebook", "use_codebook", is_flag=True, flag_value=False, default=True,
+              help="Use per-task explicit constraints instead of the shared codebook.md.")
 def run(
     agent_name: str,
     model_name: str,
@@ -385,14 +415,18 @@ def run(
     pg_database: str | None,
     pg_user: str | None,
     pg_password: str | None,
+    use_codebook: bool,
 ) -> None:
     """
     Run a Halluci-Action experiment.
 
     Examples:
 
-        # Using predefined task:
-        python -m research.harness run --agent deepseek --model deepseek-chat --task-id task1
+        # Using predefined task (explicit constraints):
+        python -m research.harness run --agent deepseek --model deepseek-chat --task-id S-1
+
+        # Using codebook condition (agent must self-apply policy):
+        python -m research.harness run --agent deepseek --model deepseek-chat --task-id S-1 --codebook
 
         # Using custom prompt:
         python -m research.harness run --agent openai --model gpt-4 --task "Process order for customer X"
@@ -402,22 +436,18 @@ def run(
     """
     # Handle task-id=list to show available tasks
     if task_id == "list":
-        click.echo("\nAvailable predefined tasks:\n")
-        for task_info in list_tasks():
-            click.echo(f"  {task_info['id']:8s} - {task_info['name']}")
-            click.echo(f"             {task_info['description']}")
-            click.echo(f"             Target HA types: {', '.join(task_info['target_ha_types'])}")
-            click.echo()
+        print_task_listing()
         return
 
     # Resolve task prompt and system prompt
     task_system_prompt: str | None = None
     if task_id:
         task_def = get_task(task_id)
-        # User message: ONLY the task instruction (constraints are in system prompt)
+        # User message: ONLY the task instruction (constraints never shown to agent)
         final_task_prompt = get_task_prompt(task_id, include_constraints=False)
-        # Task-specific system prompt with constraints
-        task_system_prompt = get_system_prompt(task_id)
+        # System prompt: codebook condition vs explicit constraints condition
+        task_system_prompt = get_system_prompt(task_id, use_codebook=use_codebook)
+        click.echo(f"Constraint mode: {'codebook' if use_codebook else 'explicit'}")
         click.echo(f"\n=== Running Task: {task_def['name']} ===")
         click.echo(f"Description: {task_def['description']}")
         click.echo(f"Target HA types: {', '.join(task_def['target_ha_types'])}")
@@ -460,18 +490,13 @@ def run(
 
 
 @cli.command("list-tasks")
-def list_tasks_cmd() -> None:
-    """List all predefined task scenarios."""
-    click.echo("\nPredefined Halluci-Action Task Scenarios:\n")
-    click.echo("=" * 70)
-    for task_info in list_tasks():
-        click.echo(f"\n  ID: {task_info['id']}")
-        click.echo(f"  Name: {task_info['name']}")
-        click.echo(f"  Description: {task_info['description']}")
-        click.echo(f"  Target HA types: {', '.join(task_info['target_ha_types'])}")
-    click.echo("\n" + "=" * 70)
+@click.option("--domain", default=None, help="Filter by task domain, e.g. sales or inventory.")
+@click.option("--difficulty", default=None, help="Filter by difficulty: easy|medium|hard|comprehensive.")
+def list_tasks_cmd(domain: str | None, difficulty: str | None) -> None:
+    """List task scenarios from the reusable research.tasks registry."""
+    print_task_listing(domain=domain, difficulty=difficulty)
     click.echo("\nUsage: python -m research.harness run --agent <agent> --model <model> --task-id <task_id>")
-    click.echo("Example: python -m research.harness run --agent deepseek --model deepseek-chat --task-id task1\n")
+    click.echo("Example: python -m research.harness run --agent deepseek --model deepseek-chat --task-id S-1\n")
 
 
 if __name__ == "__main__":

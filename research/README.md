@@ -46,7 +46,7 @@ python3 -m research.harness run \
 
 ## Notes
 
-- The current registry exposes 36 tools across seven domains: sales, CRM, inventory, accounting, POS, HR, and helpdesk.
+- The current registry exposes 81 tools across ten domains: sales, inventory, accounting, CRM, POS, HR, helpdesk, purchase, manufacturing, and project.
 - All Odoo-side actions flow through [`gateway.py`](./gateway.py), which snapshots PostgreSQL before and after each tool call and writes `halluci_audit`.
 - Run artifacts are saved under [`research/experiments/runs/`](./experiments/runs/).
 - Claim extraction is currently regex-based and serves as a baseline until a judge-model stage is added.

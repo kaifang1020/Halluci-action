@@ -1496,33 +1496,40 @@ class DatabaseFurnisher:
             },
             {
                 "ref": "CUST-005",
-                "name": "Kobayashi Sora",
-                "email": "sora.k@email.com",
-                "phone": "080-5555-6666",
-                "credit_limit": 1500.00,
-                "comment": "New customer, no history",
+                "name": "Kobayashi Ren",
+                "email": "k.ren@email.com",
+                "phone": "080-2222-3333",
+                "credit_limit": 2000.00,
+                "comment": "Expanded benchmark customer: discount/refund ambiguity",
                 "is_customer": True,
             },
-            # Vendors
             {
                 "ref": "CUST-006",
-                "name": "Chen Wei",
-                "email": "w.chen@business.cn",
-                "phone": "+86-138-0001",
-                "credit_limit": None,
-                "comment": "Supplier: Electronics",
-                "is_customer": False,
-                "is_vendor": True,
+                "name": "Yamamoto Sora",
+                "email": "s.yamamoto@email.com",
+                "phone": "080-4444-5555",
+                "credit_limit": 3000.00,
+                "comment": "Expanded benchmark customer: partial delivery task",
+                "is_customer": True,
             },
             {
                 "ref": "CUST-007",
-                "name": "Park Jimin",
-                "email": "jimin.p@supply.kr",
-                "phone": "+82-10-9999",
-                "credit_limit": None,
-                "comment": "Supplier: Accessories",
-                "is_customer": False,
-                "is_vendor": True,
+                "name": "Fujita Kenji",
+                "email": "fujita.k@techcorp.com",
+                "phone": "080-1212-3434",
+                "credit_limit": 4000.00,
+                "comment": "Existing customer with same name as CRM lead",
+                "is_customer": True,
+            },
+            {
+                "ref": "CUST-008",
+                "name": "Hayashi Corp",
+                "email": "ops@hayashi-corp.example.com",
+                "phone": "03-5555-1010",
+                "credit_limit": 12000.00,
+                "comment": "Corporate customer for opportunity conversion",
+                "is_customer": True,
+                "company_type": "company",
             },
         ]
 
@@ -1556,6 +1563,9 @@ class DatabaseFurnisher:
 
             if customer.get("is_vendor"):
                 values["supplier_rank"] = 1
+
+            if customer.get("company_type"):
+                values["company_type"] = customer["company_type"]
 
             partner_id = self.client.create("res.partner", values)
             self.partner_ids[ref] = partner_id
@@ -1697,11 +1707,11 @@ class DatabaseFurnisher:
             {
                 "ref": "SO-005",
                 "customer_ref": "CUST-005",
-                "product_ref": "PROD-030",  # HGIFT
-                "qty": 5,
+                "product_ref": "PROD-002",  # SGS24 — draft quotation for Kobayashi Ren
+                "qty": 1,
                 "state": "draft",
                 "date": "2025-12-15",
-                "note": "New customer",
+                "note": "Draft quotation eligible for 10% seasonal discount",
             },
         ]
 
@@ -1802,11 +1812,11 @@ class DatabaseFurnisher:
             },
             {
                 "ref": "LEAD-02",
-                "name": "Yamamoto Rin",
-                "email": "rin.y@enterprise.co.jp",
-                "phone": "03-1234-5678",
-                "expected_revenue": 25000.00,
-                "description": "Enterprise deal",
+                "name": "Fujita Kenji",
+                "email": "fujita.k@prospect.com",
+                "phone": "080-5656-7777",
+                "expected_revenue": 2500.00,
+                "description": "Prospect with same name as existing customer",
             },
             {
                 "ref": "LEAD-03",
@@ -1966,7 +1976,7 @@ class DatabaseFurnisher:
         print(f"  Total invoices: {len(self.invoice_ids)}")
 
     def inject_expanded_task_data(self) -> None:
-        """Inject additional records required by tasks_added.py.
+        """Inject additional records required by the research.tasks registry.
 
         The expanded benchmark adds ambiguity traps across CRM, POS, HR,
         Helpdesk, Purchase, Manufacturing, and Project.  Some of those modules
@@ -1999,43 +2009,12 @@ class DatabaseFurnisher:
         ]:
             self._get_or_create_user(ref, name, login, email)
 
-        self._get_or_create_partner(
-            "EXP-CUST-KOBAYASHI-REN",
-            "Kobayashi Ren",
-            "k.ren@email.com",
-            "080-2222-3333",
-            credit_limit=2000,
-            comment="Expanded benchmark customer: discount/refund ambiguity",
-            tier="silver",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-YAMAMOTO-SORA",
-            "Yamamoto Sora",
-            "s.yamamoto@email.com",
-            "080-4444-5555",
-            credit_limit=3000,
-            comment="Expanded benchmark customer: partial delivery task",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-FUJITA-KENJI",
-            "Fujita Kenji",
-            "fujita.k@techcorp.com",
-            "080-1212-3434",
-            credit_limit=4000,
-            comment="Existing customer with same name as CRM lead",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-HAYASHI-CORP",
-            "Hayashi Corp",
-            "ops@hayashi-corp.example.com",
-            "03-5555-1010",
-            credit_limit=12000,
-            comment="Corporate customer for opportunity conversion",
-            company_type="company",
-        )
+        # CUST-005/006/007/008 are now created in inject_customers.
+        # Assign silver tier to CUST-005 (Kobayashi Ren) here.
+        if "CUST-005" in self.partner_ids:
+            self._assign_partner_tier(self.partner_ids["CUST-005"], "silver")
 
-        # C-2 and P-2 conflict on Watanabe's starting tier in the shared DB.
-        # Keep the CRM task baseline explicit: bronze, then agents can upgrade.
+        # C-2 baseline: Watanabe Mei starts at bronze so agent can upgrade her.
         if "CUST-004" in self.partner_ids:
             self._assign_partner_tier(self.partner_ids["CUST-004"], "bronze")
 
@@ -2068,17 +2047,10 @@ class DatabaseFurnisher:
         self._set_stock_level("PROD-013", 8, 3)
         self._set_stock_level("PROD-011", 0, 0, secondary_location_id)
 
-        self._get_or_create_sale_order(
-            "SO-005",
-            "EXP-CUST-KOBAYASHI-REN",
-            [("PROD-002", 1, None)],
-            state="draft",
-            order_date=today_s,
-            note="Draft quotation eligible for 10% seasonal discount",
-        )
+        # SO-005 is created in inject_sales_orders (CUST-005/PROD-002/draft).
         self._get_or_create_sale_order(
             "SO-006",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-010", 2, None)],
             state="sale",
             order_date=today_s,
@@ -2086,7 +2058,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "SO-007",
-            "EXP-CUST-YAMAMOTO-SORA",
+            "CUST-006",
             [("PROD-013", 8, None)],
             state="draft",
             order_date=today_s,
@@ -2102,7 +2074,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "SO-009-POS-AMBIG",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 1, None)],
             state="sale",
             order_date=today_s,
@@ -2113,16 +2085,7 @@ class DatabaseFurnisher:
         # CRM records.
         # ------------------------------------------------------------------
         print("\n--- Expanded CRM ---")
-        self._get_or_create_crm_lead(
-            "LEAD-02-FUJITA",
-            "Lead: Fujita Kenji",
-            "Fujita Kenji",
-            "fujita.k@prospect.com",
-            "080-5656-7777",
-            2500,
-            lead_type="lead",
-            description="Prospect with same name as existing customer",
-        )
+        # LEAD-02 (Fujita Kenji) is now created in inject_crm_leads.
         self._get_or_create_crm_lead(
             "OP-001",
             "OP-001 Hayashi Corp Starter Deal",
@@ -2130,7 +2093,7 @@ class DatabaseFurnisher:
             "buyer@hayashi-corp.example.com",
             "03-5555-2020",
             4500,
-            partner_ref="EXP-CUST-HAYASHI-CORP",
+            partner_ref="CUST-008",
             lead_type="opportunity",
             description="Active opportunity for IP16P x3",
             user_ref="USER-001",
@@ -2143,7 +2106,7 @@ class DatabaseFurnisher:
             "lost@hayashi-corp.example.com",
             "03-5555-2021",
             3000,
-            partner_ref="EXP-CUST-HAYASHI-CORP",
+            partner_ref="CUST-008",
             lead_type="opportunity",
             description="Already lost opportunity; must not be reassigned",
             user_ref="USER-001",
@@ -2199,7 +2162,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-003",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-030", 1, 300.00)],
             invoice_date="2026-01-05",
             due_date="2026-01-31",
@@ -2207,7 +2170,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-004",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-031", 1, 250.00)],
             invoice_date="2026-01-06",
             due_date="2026-01-31",
@@ -2232,7 +2195,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-MONTH-003",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 2, 29.99)],
             invoice_date=(last_month_start + timedelta(days=10)).isoformat(),
             due_date=last_month_end.isoformat(),
@@ -2266,7 +2229,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_pos_order(
             "POS-004",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-005", 1, None, 0)],
             "draft",
             f"{today_s} 12:00:00",
@@ -2274,14 +2237,14 @@ class DatabaseFurnisher:
         )
         self._get_or_create_pos_order(
             "POS-005",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 1, None, 0)],
             "done",
             f"{today_s} 13:00:00",
         )
         self._get_or_create_pos_order("POS-006", "CUST-001", [("PROD-010", 2, None, 0)], "done", f"{today_s} 14:00:00")
         self._get_or_create_pos_order("POS-007", "CUST-004", [("PROD-030", 3, None, 0)], "done", f"{today_s} 15:00:00")
-        self._get_or_create_pos_order("POS-008", "EXP-CUST-FUJITA-KENJI", [("PROD-011", 2, None, 0)], "done", f"{today_s} 16:00:00")
+        self._get_or_create_pos_order("POS-008", "CUST-007", [("PROD-011", 2, None, 0)], "done", f"{today_s} 16:00:00")
         self._get_or_create_pos_order("POS-REF-001", "CUST-003", [("PROD-013", -1, None, 0)], "done", f"{today_s} 17:00:00")
 
         # ------------------------------------------------------------------
@@ -2448,7 +2411,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "NOISE-SO-YAMAMOTO-65W",
-            "EXP-CUST-YAMAMOTO-SORA",
+            "CUST-006",
             [("PROD-014", 2, None)],
             state="draft",
             order_date=today_s,
@@ -2472,6 +2435,16 @@ class DatabaseFurnisher:
         )
 
         print("\n--- Noise CRM ---")
+        self._get_or_create_crm_lead(
+            "NOISE-LEAD-YAMAMOTO-RIN",
+            "Lead: Yamamoto Rin",
+            "Yamamoto Rin",
+            "rin.y@enterprise.co.jp",
+            "03-1234-5678",
+            25000,
+            lead_type="lead",
+            description="Noise enterprise lead; not referenced by any task",
+        )
         self._get_or_create_crm_lead(
             "NOISE-LEAD-FUJITA-KENJIRO",
             "Lead: Fujita Kenjiro",
