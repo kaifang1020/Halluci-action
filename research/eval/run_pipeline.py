@@ -2,14 +2,14 @@
 Run the Halluci-Action evaluation pipeline end to end.
 
 Default behavior:
-  - run pass1, pass2, pass3_stage1, pass3_stage2
+  - run pass1, pass2, pass3_stage1, pass3_stage2, pass4_constraints
   - write one compact final JSON to evaluations/results/
   - store intermediate files in a temporary directory and delete them
 
 Use --keep-intermediate to keep pass outputs for debugging.
 Use --pass1-existing to skip the expensive Pass 1 LLM extraction when you
 already have a Pass 1 JSON file.
-Use --heuristic to preview Pass 3 without LLM calls.
+Use --heuristic to preview Pass 3 and Pass 4 without LLM calls.
 """
 
 from __future__ import annotations
@@ -76,6 +76,7 @@ def build_compact_final(
     pass2_path: Path,
     stage1_path: Path,
     stage2_path: Path,
+    pass4_path: Path | None = None,
     gaps_only: bool = False,
 ) -> dict[str, Any]:
     trajectory = load_json(trajectory_path)
@@ -83,6 +84,7 @@ def build_compact_final(
     actions = load_json(pass2_path)
     stage1_results = load_json(stage1_path)
     stage2_results = load_json(stage2_path)
+    pass4_payload = load_json(pass4_path) if pass4_path and pass4_path.exists() else {}
 
     actions_by_id = {
         action["action_id"]: action
@@ -97,6 +99,11 @@ def build_compact_final(
     stage2_by_claim = {
         item["claim_id"]: item
         for item in stage2_results
+        if isinstance(item.get("claim_id"), int)
+    }
+    pass4_by_claim = {
+        item["claim_id"]: item
+        for item in (pass4_payload.get("results") or [])
         if isinstance(item.get("claim_id"), int)
     }
 
@@ -132,6 +139,16 @@ def build_compact_final(
         if gaps_only and final_status != "gap":
             continue
 
+        constraint_check = pass4_by_claim.get(claim_id)
+        if constraint_check is None:
+            constraint_check = {
+                "checked": False,
+                "violated": False,
+                "violated_constraints": [],
+                "reason": "",
+                "confidence": None,
+            }
+
         final_claims.append(
             {
                 "claim_id": claim_id,
@@ -154,21 +171,33 @@ def build_compact_final(
                 "evidence_summary": evidence_summary,
                 "reason": reason,
                 "confidence": confidence,
+                "constraint_check": constraint_check,
             }
         )
 
     gap_claims = [claim for claim in final_claims if claim.get("final_status") == "gap"]
     ha_counts: dict[str, int] = {}
     gap_counts: dict[str, int] = {}
+    constraint_counts: dict[str, int] = {}
+    constraint_violations_total = 0
+    gaps_with_constraint_violation_total = 0
     for claim in gap_claims:
         ha_type = claim.get("ha_type") or "None"
         gap_type = claim.get("gap_type") or "None"
         ha_counts[ha_type] = ha_counts.get(ha_type, 0) + 1
         gap_counts[gap_type] = gap_counts.get(gap_type, 0) + 1
+        constraint_check = claim.get("constraint_check") or {}
+        if constraint_check.get("violated"):
+            gaps_with_constraint_violation_total += 1
+            for violation in constraint_check.get("violated_constraints") or []:
+                constraint_id = violation.get("constraint_id") or "UNKNOWN"
+                constraint_counts[constraint_id] = constraint_counts.get(constraint_id, 0) + 1
+                constraint_violations_total += 1
 
     return {
         "trajectory_id": trajectory.get("trajectory_id"),
         "trajectory_file": str(trajectory_path),
+        "task_id": trajectory.get("task_id") or pass4_payload.get("task_id"),
         "task": trajectory.get("task"),
         "summary": {
             "claims_total": len(claims),
@@ -177,6 +206,9 @@ def build_compact_final(
             "gaps_total": len(gap_claims),
             "ha_type_counts": ha_counts,
             "gap_type_counts": gap_counts,
+            "gaps_with_constraint_violation_total": gaps_with_constraint_violation_total,
+            "constraint_violations_total": constraint_violations_total,
+            "constraint_violation_counts": constraint_counts,
         },
         "claims": final_claims,
     }
@@ -209,10 +241,16 @@ def build_compact_final(
 @click.option("--model-1b", default=None, help="Defaults to env config or gpt-4o.")
 @click.option("--model-stage1", default=None, help="Defaults to env config or gpt-4o.")
 @click.option("--model-stage2", default=None, help="Defaults to env config or gpt-4o.")
+@click.option("--model-stage4", default=None, help="Defaults to env config or gpt-4o.")
 @click.option("--heuristic", is_flag=True, default=False,
-              help="Use heuristic mode for pass3_stage1/pass3_stage2.")
+              help="Use heuristic mode for pass3_stage1/pass3_stage2/pass4.")
 @click.option("--max-actions", default=8, show_default=True,
               help="Max candidate actions for pass3_stage2.")
+@click.option("--max-actions-stage4", default=16, show_default=True,
+              help="Max relevant actions sent to pass4 per gap.")
+@click.option("--codebook", "codebook_path", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=HERE.parent / "codebook.md", show_default=True,
+              help="Policy codebook markdown file for pass4.")
 @click.option("--gaps-only", is_flag=True, default=False,
               help="Only include final gap claims in compact final output.")
 def main(
@@ -231,27 +269,35 @@ def main(
     model_1b: str | None,
     model_stage1: str | None,
     model_stage2: str | None,
+    model_stage4: str | None,
     heuristic: bool,
     max_actions: int,
+    max_actions_stage4: int,
+    codebook_path: Path,
     gaps_only: bool,
 ) -> None:
-    """Run Pass 1, Pass 2, Pass 3 Stage 1, Pass 3 Stage 2, then write compact final JSON."""
+    """Run the full claim/action and constraint-audit pipeline, then write compact final JSON."""
     load_env_file(env_file)
     apply_profile(profile)
     api_key = resolve_api_key(api_key) or None
     base_url = resolve_base_url(base_url)
+    if api_key:
+        os.environ["LLM_API_KEY"] = api_key
+    if base_url:
+        os.environ["LLM_BASE_URL"] = base_url
     model_1a = resolve_model("PASS1A", model_1a)
     model_1b = resolve_model("PASS1B", model_1b)
     model_stage1 = resolve_model("STAGE1", model_stage1)
     model_stage2 = resolve_model("STAGE2", model_stage2)
+    model_stage4 = resolve_model("STAGE4", model_stage4)
 
     trajectory_path = trajectory_path.resolve()
-    output_dir = output_dir or trajectory_path.parent / "evaluations" / "results"
+    output_dir = (output_dir.resolve() if output_dir else trajectory_path.parent / "evaluations" / "results")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     temp_context: tempfile.TemporaryDirectory[str] | None = None
     if keep_intermediate:
-        work_root = work_dir or trajectory_path.parent / "evaluations" / "debug" / trajectory_path.stem
+        work_root = (work_dir.resolve() if work_dir else trajectory_path.parent / "evaluations" / "debug" / trajectory_path.stem)
         work_root.mkdir(parents=True, exist_ok=True)
     else:
         temp_context = tempfile.TemporaryDirectory(prefix=f"{trajectory_path.stem}__", dir="/tmp")
@@ -262,6 +308,7 @@ def main(
         pass2_path = work_root / f"{trajectory_path.stem}__pass2.json"
         stage1_path = work_root / f"{trajectory_path.stem}__pass3_stage1.json"
         stage2_path = work_root / f"{trajectory_path.stem}__pass3_stage2.json"
+        pass4_path = work_root / f"{trajectory_path.stem}__pass4_constraints.json"
 
         if pass1_existing:
             shutil.copy2(pass1_existing, pass1_path)
@@ -285,10 +332,6 @@ def main(
             ]
             if registry_path:
                 cmd.extend(["--registry-path", str(registry_path.resolve())])
-            if api_key:
-                cmd.extend(["--api-key", api_key])
-            if base_url:
-                cmd.extend(["--base-url", base_url])
             run_command(cmd, "Pass 1")
 
         run_command(
@@ -319,10 +362,6 @@ def main(
         ]
         if heuristic:
             stage1_cmd.append("--heuristic")
-        elif api_key:
-            stage1_cmd.extend(["--api-key", api_key])
-        if base_url:
-            stage1_cmd.extend(["--base-url", base_url])
         run_command(stage1_cmd, "Pass 3 Stage 1")
 
         stage2_cmd = [
@@ -344,11 +383,34 @@ def main(
         ]
         if heuristic:
             stage2_cmd.append("--heuristic")
-        elif api_key:
-            stage2_cmd.extend(["--api-key", api_key])
-        if base_url:
-            stage2_cmd.extend(["--base-url", base_url])
         run_command(stage2_cmd, "Pass 3 Stage 2")
+
+        pass4_cmd = [
+            sys.executable,
+            str(HERE / "pass4_constraints.py"),
+            "run",
+            "--trajectory",
+            str(trajectory_path),
+            "--pass1",
+            str(pass1_path),
+            "--pass2",
+            str(pass2_path),
+            "--stage1",
+            str(stage1_path),
+            "--stage2",
+            str(stage2_path),
+            "--codebook",
+            str(codebook_path.resolve()),
+            "--output",
+            str(pass4_path),
+            "--model",
+            model_stage4,
+            "--max-actions",
+            str(max_actions_stage4),
+        ]
+        if heuristic:
+            pass4_cmd.append("--heuristic")
+        run_command(pass4_cmd, "Pass 4 Constraint Audit")
 
         final = build_compact_final(
             trajectory_path=trajectory_path,
@@ -356,6 +418,7 @@ def main(
             pass2_path=pass2_path,
             stage1_path=stage1_path,
             stage2_path=stage2_path,
+            pass4_path=pass4_path,
             gaps_only=gaps_only,
         )
         final_path = output_dir / f"{trajectory_path.stem}__final.json"

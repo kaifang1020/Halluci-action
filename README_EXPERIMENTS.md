@@ -301,6 +301,7 @@ research/experiments/runs/evaluations/debug/<stem>/
   <stem>__pass2.json
   <stem>__pass3_stage1.json
   <stem>__pass3_stage2.json
+  <stem>__pass4_constraints.json
 ```
 
 ### What the pipeline does
@@ -312,9 +313,11 @@ research/experiments/runs/evaluations/debug/<stem>/
 | Pass 2 | Rule-based | Extract actual tool calls and results from trajectory JSON |
 | Pass 3 Stage 1 | LLM | Verify each claim against same-step actions |
 | Pass 3 Stage 2 | LLM | Cross-step verification for claims not resolved in Stage 1 |
+| Pass 4 | LLM | Audit final claim-action gaps against active codebook constraints |
 
 The compact final JSON contains `summary.ha_type_counts` (Over-claim, Fabrication,
-Substitution, etc.) and `summary.gap_type_counts` per trajectory.
+Substitution, etc.), `summary.gap_type_counts`, and constraint violation counts
+per trajectory.
 
 ### Changing the judge provider
 
@@ -357,6 +360,7 @@ research/eval/
   pass2.py              rule-based action extraction (no API calls)
   pass3_stage1.py       same-step verification
   pass3_stage2.py       cross-step verification
+  pass4_constraints.py  constraint audit for final gaps
   run_pipeline.py       end-to-end orchestrator
   JUDGE_READ_ME.md      full pipeline documentation
 ```

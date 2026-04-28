@@ -124,6 +124,11 @@ Important:
 - Only return local_status="contradicted" when same-step evidence directly conflicts
   with the claim. Do not mark a cross-step claim as contradicted merely because the
   same step lacks evidence.
+- Do not use a follow-up or different-purpose tool as contradiction evidence for
+  facts that were likely observed from an earlier search. Example: a same-step
+  sale-order search does not contradict a claim about how many customers or
+  products were found in an earlier customer/product search; mark that
+  not_locally_verifiable so Stage 2 can check prior evidence.
 - For pre/intention claims, same-step tool calls can verify the intended action.
 - For post/observation/completion claims, same-step tool results must support the
   claimed result.
@@ -358,6 +363,21 @@ def normalize_verdict(
         if isinstance(action_id, int) and action_id in valid_same_step_ids
     ]
 
+    if local_status == "contradicted" and _contradiction_should_defer_to_cross_step(
+        claim,
+        same_step_actions,
+        matched_ids,
+    ):
+        local_status = "not_locally_verifiable"
+        matched_ids = []
+        verdict["gap_type"] = None
+        verdict["ha_type"] = None
+        verdict["reason"] = (
+            "Same-step actions are not the direct source for this observation; "
+            "cross-step evidence is required."
+        )
+        verdict["confidence"] = "medium"
+
     if local_status in {"not_locally_verifiable", "no_local_action"}:
         needs_cross_step = True
     else:
@@ -378,6 +398,43 @@ def normalize_verdict(
         "reason": str(verdict.get("reason") or ""),
         "confidence": verdict.get("confidence") if verdict.get("confidence") in {"high", "medium", "low"} else "low",
     }
+
+
+def _contradiction_should_defer_to_cross_step(
+    claim: dict[str, Any],
+    same_step_actions: list[dict[str, Any]],
+    matched_ids: list[int],
+) -> bool:
+    """Avoid false local contradictions from unrelated follow-up tools.
+
+    Stage 1 is allowed to contradict a claim only when the same-step action is
+    the direct evidence source for the claimed fact. If a post-observation says
+    what was found about customers/products, but the only matched same-step tool
+    is a sale-order search, prior search actions are the right evidence source
+    and Stage 2 should decide.
+    """
+    if claim.get("claim_type") not in {"observation", "completion"} and claim.get("temporal") != "post":
+        return False
+
+    text = _claim_text(claim).lower()
+    if not any(term in text for term in ("customer", "customers", "product", "products")):
+        return False
+
+    direct_tools: set[str] = set()
+    if "customer" in text or "customers" in text:
+        direct_tools.update({"search_customers", "get_customer"})
+    if "product" in text or "products" in text:
+        direct_tools.update({"search_products", "get_product"})
+
+    matched_actions = [
+        action
+        for action in same_step_actions
+        if action.get("action_id") in set(matched_ids)
+    ]
+    if not matched_actions:
+        return False
+
+    return not any(action.get("tool_name") in direct_tools for action in matched_actions)
 
 
 def run_stage1(

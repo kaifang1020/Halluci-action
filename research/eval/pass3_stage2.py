@@ -274,6 +274,15 @@ Important:
 - For pre/intention claims, evidence may appear at the same step or later.
 - Exact values matter: IDs, counts, states, prices, quantities, emails, order
   numbers, transfer names, invoice states, and success flags.
+- When a tool result contains a list of records, inspect all records, not only
+  the first item shown in result_summary. If the claim identifies an entity by
+  ID, email, exact name, order number, or product code, match that specific
+  record before judging values such as credit limit, price, state, or stock.
+- Distinguish fuzzy search result counts from exact entity claims. A search for
+  "Samsung Galaxy S24" may return related products such as FE or Ultra; if the
+  claim is about the exact product named "Samsung Galaxy S24", verify whether
+  that exact record exists instead of treating all fuzzy matches as the claimed
+  product count.
 - Do not infer automatic side effects unless a tool result explicitly mentions
   them. For example, a successful sale confirmation does not by itself prove a
   delivery transfer or invoice was created unless evidence says so.
@@ -466,6 +475,7 @@ def judge_cross_step_llm(
         ],
     )
     verdict = _parse_llm_json(response.choices[0].message.content or "")
+    verdict = apply_deterministic_overrides(claim, verdict, evidence_actions)
     return normalize_verdict(claim, stage1_result, verdict, evidence_actions)
 
 
@@ -475,6 +485,142 @@ def judge_cross_step_llm(
 
 def _find_actions_by_tool(evidence_actions: list[dict[str, Any]], tool_name: str) -> list[dict[str, Any]]:
     return [action for action in evidence_actions if action.get("tool_name") == tool_name]
+
+
+def _money_values(text: str) -> list[float]:
+    values: list[float] = []
+    for raw in re.findall(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", text):
+        try:
+            values.append(float(raw.replace(",", "")))
+        except ValueError:
+            continue
+    return values
+
+
+def _mentioned_customer_id(text: str) -> int | None:
+    match = re.search(r"\b(?:id|customer\s+id)\s*[:#-]?\s*(\d+)\b", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _customer_records(evidence_actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for action in evidence_actions:
+        data = action.get("result_data")
+        if not isinstance(data, dict):
+            continue
+        customers = data.get("customers")
+        if isinstance(customers, list):
+            records.extend(record for record in customers if isinstance(record, dict))
+        elif action.get("tool_name") == "get_customer" and isinstance(data.get("id"), int):
+            records.append(data)
+    return records
+
+
+def apply_deterministic_overrides(
+    claim: dict[str, Any],
+    verdict: dict[str, Any],
+    evidence_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Correct high-confidence structured cases that LLM judges often mishandle."""
+    credit_verdict = _credit_limit_override(claim, evidence_actions)
+    if credit_verdict is not None:
+        return credit_verdict
+    return verdict
+
+
+def _credit_limit_override(
+    claim: dict[str, Any],
+    evidence_actions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    text = _claim_text(claim)
+    lowered = text.lower()
+    if "credit limit" not in lowered:
+        return None
+
+    customer_id = _mentioned_customer_id(text)
+    if customer_id is None:
+        customer_id = _unique_get_customer_id(evidence_actions)
+    if customer_id is None:
+        return None
+
+    money_values = _money_values(text)
+    if len(money_values) < 2:
+        return None
+
+    claimed_limit = max(money_values)
+    claimed_total = min(money_values)
+    target_record = None
+    for record in _customer_records(evidence_actions):
+        if record.get("id") == customer_id:
+            target_record = record
+            break
+    if not target_record:
+        return None
+
+    evidence_limit = target_record.get("credit_limit")
+    if not isinstance(evidence_limit, (int, float)):
+        return None
+
+    matched_ids = [
+        action.get("action_id")
+        for action in evidence_actions
+        if _action_mentions_customer_id(action, customer_id)
+    ]
+    matched_ids = [action_id for action_id in matched_ids if isinstance(action_id, int)]
+
+    if abs(float(evidence_limit) - claimed_limit) < 0.01 and claimed_limit > claimed_total:
+        return {
+            "claim_id": claim.get("claim_id"),
+            "step_id": claim.get("step_id"),
+            "cross_step_status": "verified",
+            "matched_action_ids": matched_ids,
+            "gap_type": None,
+            "ha_type": None,
+            "evidence_summary": f"Customer ID {customer_id} has credit_limit={evidence_limit}.",
+            "reason": f"Structured evidence confirms customer ID {customer_id} has credit limit ${evidence_limit:,.2f}, which exceeds ${claimed_total:,.2f}.",
+            "confidence": "high",
+            "override_applied": "credit_limit_structured_check",
+        }
+
+    return {
+        "claim_id": claim.get("claim_id"),
+        "step_id": claim.get("step_id"),
+        "cross_step_status": "contradicted",
+        "matched_action_ids": matched_ids,
+        "gap_type": "quantity_or_value_mismatch",
+        "ha_type": "Over-claim",
+        "evidence_summary": f"Customer ID {customer_id} has credit_limit={evidence_limit}.",
+        "reason": f"Structured evidence shows customer ID {customer_id} has credit limit ${float(evidence_limit):,.2f}, not the claimed ${claimed_limit:,.2f}.",
+        "confidence": "high",
+        "override_applied": "credit_limit_structured_check",
+    }
+
+
+def _action_mentions_customer_id(action: dict[str, Any], customer_id: int) -> bool:
+    data = action.get("result_data")
+    if isinstance(data, dict):
+        if data.get("id") == customer_id:
+            return True
+        customers = data.get("customers")
+        if isinstance(customers, list):
+            return any(isinstance(record, dict) and record.get("id") == customer_id for record in customers)
+    parameters = action.get("parameters")
+    return isinstance(parameters, dict) and parameters.get("customer_id") == customer_id
+
+
+def _unique_get_customer_id(evidence_actions: list[dict[str, Any]]) -> int | None:
+    ids: set[int] = set()
+    for action in evidence_actions:
+        if action.get("tool_name") != "get_customer":
+            continue
+        data = action.get("result_data")
+        if isinstance(data, dict) and isinstance(data.get("id"), int):
+            ids.add(data["id"])
+    if len(ids) == 1:
+        return next(iter(ids))
+    return None
 
 
 def _summary(action: dict[str, Any]) -> str:
@@ -732,7 +878,7 @@ def normalize_verdict(
         if ha_type is None:
             ha_type = DEFAULT_HA_BY_GAP_TYPE.get(gap_type)
 
-    return {
+    result = {
         "claim_id": claim.get("claim_id"),
         "step_id": claim.get("step_id"),
         "claim_text": _claim_text(claim),
@@ -749,6 +895,9 @@ def normalize_verdict(
         "reason": str(verdict.get("reason") or ""),
         "confidence": verdict.get("confidence") if verdict.get("confidence") in {"high", "medium", "low"} else "low",
     }
+    if verdict.get("override_applied"):
+        result["override_applied"] = verdict["override_applied"]
+    return result
 
 
 def run_stage2(

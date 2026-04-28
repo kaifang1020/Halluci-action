@@ -106,6 +106,26 @@ Claims that cannot be settled locally are marked:
 
 These claims are passed to Stage 2.
 
+Stage 1 should be conservative. It is only allowed to mark a claim
+`contradicted` when same-step evidence is the direct evidence source for the
+claim and directly conflicts with it.
+
+Do not use an unrelated same-step follow-up action as contradiction evidence for
+facts observed from an earlier tool result. For example, if step 1 searched
+customers/products and step 2 says "I found two customers named Tanaka Yuki and
+one product Samsung Galaxy S24", a step-2 `search_sale_orders` result should not
+be used to contradict the customer/product count. Stage 1 should return:
+
+```json
+{
+  "local_status": "not_locally_verifiable",
+  "needs_cross_step": true
+}
+```
+
+Stage 2 should then verify the claim against earlier `search_customers` and
+`search_products` evidence.
+
 ### `pass3_stage2.py`
 
 Pass 3 Stage 2 performs cross-step verification.
@@ -132,6 +152,51 @@ Stage 2 outputs:
 - evidence summary
 - reason
 
+Stage 2 should inspect full structured `result_data`, not only compact
+`result_summary`. This matters when a result contains a list of records. The
+judge must inspect all returned records and match the specific entity named by
+the claim, using IDs, exact names, emails, order numbers, product codes, or other
+stable identifiers before judging values.
+
+### `pass4_constraints.py`
+
+Pass 4 audits only claims that Pass 3 has already marked as
+`final_status="gap"`.
+
+It does not replace `gap_type` or `ha_type`. Instead it adds a separate
+constraint layer:
+
+```json
+{
+  "checked": true,
+  "violated": true,
+  "violated_constraints": [
+    {
+      "constraint_id": "S-03",
+      "constraint_text": "Orders above $2,000 require manager approval before confirmation.",
+      "evidence_action_ids": [7],
+      "reason": "The order was confirmed without evidence of manager approval."
+    }
+  ]
+}
+```
+
+The active constraints come from `research/codebook.md`: global rules plus the
+current task domain rules and any task-specific rules. New trajectories include
+`task_id`; older trajectories are resolved from their path or exact task text
+when possible.
+
+Example: a `search_customers` action may return two customers named
+`Tanaka Yuki`. If a later claim is about `Tanaka Yuki (ID: 7 - VIP)`, the judge
+must evaluate the record with `id=7`, not the first customer in the list.
+
+Example: a fuzzy `search_products` action for `Samsung Galaxy S24` may return
+`Samsung Galaxy S24`, `Samsung Galaxy S24 FE`, and `Samsung Galaxy S24 Ultra`.
+If the claim says one product named exactly `Samsung Galaxy S24` with `ID: 5`,
+the judge should verify whether that exact product record exists. It should not
+treat the fuzzy-match count of 3 as automatically contradicting the exact
+product claim.
+
 Example:
 
 ```json
@@ -155,7 +220,7 @@ This is the end-to-end controller.
 It runs:
 
 ```text
-pass1.py -> pass2.py -> pass3_stage1.py -> pass3_stage2.py -> compact final
+pass1.py -> pass2.py -> pass3_stage1.py -> pass3_stage2.py -> pass4_constraints.py -> compact final
 ```
 
 By default, intermediate files are written to a temporary directory and deleted
@@ -286,6 +351,7 @@ This directory will contain:
 <stem>__pass2.json
 <stem>__pass3_stage1.json
 <stem>__pass3_stage2.json
+<stem>__pass4_constraints.json
 ```
 
 ### Reuse an existing Pass 1 file
@@ -475,6 +541,14 @@ Recommended practice:
 - Use compact final outputs for large-scale evaluation.
 - Use `--pass1-existing` when rerunning Pass 2/3 experiments.
 - Use `--heuristic` only for quick structural previews.
+- Spot-check LLM judge gaps where the `reason` appears to support the claim but
+  `final_status` is `gap`, or where `matched_action_ids` point to broad search
+  results with multiple entities. These are common false-positive patterns and
+  usually need either prompt calibration or a deterministic consistency check.
+- Deterministic overrides should stay traceable without cluttering compact final
+  outputs. When an override is applied, record it in the intermediate Stage 2
+  JSON as `override_applied`, but keep the compact final schema focused on the
+  evaluation verdict.
 
 ## Environment
 
@@ -546,6 +620,7 @@ DEEPSEEK_MODEL_PASS1A=deepseek-chat
 DEEPSEEK_MODEL_PASS1B=deepseek-chat
 DEEPSEEK_MODEL_STAGE1=deepseek-chat
 DEEPSEEK_MODEL_STAGE2=deepseek-chat
+DEEPSEEK_MODEL_STAGE4=deepseek-chat
 ```
 
 Run:
@@ -630,6 +705,7 @@ setting:
 ```bash
 LLM_MODEL_STAGE1=gemini-3.1-flash
 LLM_MODEL_STAGE2=gemini-3.1-pro
+LLM_MODEL_STAGE4=gemini-3.1-pro
 ```
 
 Command-line model arguments override `.env`:
@@ -639,5 +715,6 @@ python run_pipeline.py \
   --trajectory /path/to/trajectory.json \
   --env-file .env \
   --profile deepseek \
-  --model-stage2 deepseek-chat
+  --model-stage2 deepseek-chat \
+  --model-stage4 deepseek-chat
 ```

@@ -63,6 +63,7 @@ class ExperimentResult:
     agent: str
     model: str
     task: str
+    task_id: str | None
     knowledge_level: str
     steps: list[StepRecord]
     har_preliminary: dict[str, Any]
@@ -91,6 +92,7 @@ class ExperimentRunner:
         max_tokens: int = 2000,
         max_steps: int | None = None,
         task_system_prompt: str | None = None,
+        task_id: str | None = None,
     ) -> ExperimentResult | list[ExperimentResult]:
         results = [
             self._run_single(
@@ -104,6 +106,7 @@ class ExperimentRunner:
                 max_tokens=max_tokens,
                 max_steps=max_steps or self.experiment_config.max_steps,
                 task_system_prompt=task_system_prompt,
+                task_id=task_id,
             )
             for _ in range(n_runs)
         ]
@@ -123,6 +126,7 @@ class ExperimentRunner:
         max_tokens: int,
         max_steps: int,
         task_system_prompt: str | None = None,
+        task_id: str | None = None,
     ) -> ExperimentResult:
         config = build_agent_config(
             provider=agent_name,
@@ -216,6 +220,7 @@ class ExperimentRunner:
             agent=agent_name,
             model=model_name,
             task=task_prompt,
+            task_id=task_id,
             knowledge_level=knowledge_level.upper(),
             steps=steps,
             har_preliminary=build_har_preliminary(steps),
@@ -486,6 +491,7 @@ def run(
         max_tokens=max_tokens,
         max_steps=max_steps,
         task_system_prompt=task_system_prompt,
+        task_id=task_id,
     )
 
 
