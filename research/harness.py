@@ -399,6 +399,7 @@ def cli() -> None:
 @click.option("--pg-password", default=None)
 @click.option("--no-codebook", "use_codebook", is_flag=True, flag_value=False, default=True,
               help="Use per-task explicit constraints instead of the shared codebook.md.")
+@click.option("--runs-dir", "runs_dir", default=None, help="Override output directory for run JSON files.")
 def run(
     agent_name: str,
     model_name: str,
@@ -421,6 +422,7 @@ def run(
     pg_user: str | None,
     pg_password: str | None,
     use_codebook: bool,
+    runs_dir: str | None,
 ) -> None:
     """
     Run a Halluci-Action experiment.
@@ -478,7 +480,8 @@ def run(
         user=pg_user or default_pg.user,
         password=pg_password or default_pg.password,
     )
-    runner = ExperimentRunner(odoo_config=odoo_config, postgres_config=postgres_config)
+    experiment_config = ExperimentConfig(runs_dir=Path(runs_dir)) if runs_dir else ExperimentConfig()
+    runner = ExperimentRunner(experiment_config=experiment_config, odoo_config=odoo_config, postgres_config=postgres_config)
     runner.run_experiment(
         agent_name=agent_name,
         model_name=model_name,
