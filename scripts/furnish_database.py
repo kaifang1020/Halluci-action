@@ -48,6 +48,11 @@ class DatabaseFurnisher:
         self.stock_location_id: int | None = None
         self.warehouse_id: int | None = None
         self.secondary_location_id: int | None = None
+        # Dual-store (QT 前滩 / HT 后滩) caches.
+        self.warehouse_qt_id: int | None = None
+        self.warehouse_ht_id: int | None = None
+        self.stock_location_qt_id: int | None = None
+        self.stock_location_ht_id: int | None = None
 
     def _get_or_create_category(self, name: str, parent_name: str | None = None) -> int:
         """Get or create a product category."""
@@ -77,42 +82,215 @@ class DatabaseFurnisher:
         print(f"  Created category: {full_name} (ID: {category_id})")
         return category_id
 
-    def _get_stock_location(self) -> int:
-        """Get the main stock location (WH/Stock)."""
-        if self.stock_location_id:
-            return self.stock_location_id
+    def _setup_stores_qt_ht(self) -> tuple[int, int]:
+        """Ensure two warehouses exist: QT (前滩) and HT (后滩).
 
-        # Try to find WH/Stock location
-        locations = self.client.search_read(
-            "stock.location",
-            [["usage", "=", "internal"]],
-            ["id", "complete_name"],
-            limit=10
+        - The first existing warehouse is repurposed as QT (renamed and
+          re-coded). This preserves the default warehouse Odoo created at
+          install while giving it the dataset's home-store semantics.
+        - HT is created from scratch when missing.
+
+        Returns (qt_stock_location_id, ht_stock_location_id). Idempotent.
+        """
+        if self.stock_location_qt_id and self.stock_location_ht_id:
+            return self.stock_location_qt_id, self.stock_location_ht_id
+
+        # --- QT --------------------------------------------------------
+        qt_wh_ids = self.client.search("stock.warehouse", [["code", "=", "QT"]], limit=1)
+        if not qt_wh_ids:
+            existing = self.client.search("stock.warehouse", [], limit=1)
+            if existing:
+                self.client.write("stock.warehouse", existing, {
+                    "name": "QT (前滩)",
+                    "code": "QT",
+                })
+                qt_wh_ids = existing
+            else:
+                qt_wh_ids = [self.client.create("stock.warehouse", {
+                    "name": "QT (前滩)",
+                    "code": "QT",
+                })]
+        qt_row = self.client.read("stock.warehouse", qt_wh_ids, ["lot_stock_id", "name", "code"])[0]
+
+        # --- HT --------------------------------------------------------
+        ht_wh_ids = self.client.search("stock.warehouse", [["code", "=", "HT"]], limit=1)
+        if not ht_wh_ids:
+            ht_wh_ids = [self.client.create("stock.warehouse", {
+                "name": "HT (后滩)",
+                "code": "HT",
+            })]
+        ht_row = self.client.read("stock.warehouse", ht_wh_ids, ["lot_stock_id", "name", "code"])[0]
+
+        self.warehouse_qt_id = qt_wh_ids[0]
+        self.warehouse_ht_id = ht_wh_ids[0]
+        self.stock_location_qt_id = qt_row["lot_stock_id"][0]
+        self.stock_location_ht_id = ht_row["lot_stock_id"][0]
+
+        # Back-compat: legacy callers expect a single primary stock location.
+        # Point them at QT so existing tasks keep their home store.
+        self.stock_location_id = self.stock_location_qt_id
+        self.warehouse_id = self.warehouse_qt_id
+
+        print(
+            f"  QT warehouse: {qt_row['name']} (code={qt_row['code']}, "
+            f"stock_location_id={self.stock_location_qt_id})"
         )
+        print(
+            f"  HT warehouse: {ht_row['name']} (code={ht_row['code']}, "
+            f"stock_location_id={self.stock_location_ht_id})"
+        )
+        return self.stock_location_qt_id, self.stock_location_ht_id
 
-        for loc in locations:
-            if "Stock" in (loc.get("complete_name") or ""):
-                self.stock_location_id = loc["id"]
-                return self.stock_location_id
-
-        # Fallback to first internal location
-        if locations:
-            self.stock_location_id = locations[0]["id"]
-            return self.stock_location_id
-
-        raise OdooRPCError("No internal stock location found")
+    def _get_stock_location(self) -> int:
+        """Return the QT (home) internal stock location id."""
+        if self.stock_location_qt_id:
+            return self.stock_location_qt_id
+        qt_loc, _ = self._setup_stores_qt_ht()
+        return qt_loc
 
     def _get_warehouse(self) -> int:
-        """Get the main warehouse."""
-        if self.warehouse_id:
-            return self.warehouse_id
+        """Return the QT warehouse id (treat QT as the default home)."""
+        if self.warehouse_qt_id:
+            return self.warehouse_qt_id
+        self._setup_stores_qt_ht()
+        return self.warehouse_qt_id  # type: ignore[return-value]
 
-        warehouses = self.client.search("stock.warehouse", [], limit=1)
-        if warehouses:
-            self.warehouse_id = warehouses[0]
-            return self.warehouse_id
+    def _vendor_location_id(self) -> int:
+        """Return the Virtual/Vendors stock.location id (usage='supplier')."""
+        ids = self.client.search("stock.location", [["usage", "=", "supplier"]], limit=1)
+        if not ids:
+            raise OdooRPCError("No supplier (vendor) stock location found.")
+        return ids[0]
 
-        raise OdooRPCError("No warehouse found")
+    def _incoming_picking_type_id(self, warehouse_id: int) -> int:
+        """Return the 'incoming' picking type id for a given warehouse."""
+        ids = self.client.search(
+            "stock.picking.type",
+            [["warehouse_id", "=", warehouse_id], ["code", "=", "incoming"]],
+            limit=1,
+        )
+        if not ids:
+            raise OdooRPCError(f"No incoming picking type for warehouse {warehouse_id}.")
+        return ids[0]
+
+    def _warehouse_for_location(self, location_id: int) -> int:
+        if location_id == self.stock_location_qt_id:
+            return self.warehouse_qt_id  # type: ignore[return-value]
+        if location_id == self.stock_location_ht_id:
+            return self.warehouse_ht_id  # type: ignore[return-value]
+        raise OdooRPCError(
+            f"Location {location_id} is not one of the seeded internal stores (QT/HT)."
+        )
+
+    def _receive_stock_via_picking(
+        self,
+        product_ref: str,
+        qty: float,
+        dest_location_id: int,
+    ) -> None:
+        """Bring `qty` units into `dest_location_id` via a validated incoming
+        stock.picking from Virtual/Vendors. The offset entry lands at the
+        Vendors location (a real business flow), so no Inventory adjustment
+        bookkeeping rows are produced.
+        """
+        if qty <= 0:
+            return
+        if product_ref not in self.product_product_ids:
+            print(f"  Warning: Product {product_ref} not found, skipping receipt")
+            return
+        product_id = self.product_product_ids[product_ref]
+        vendor_loc = self._vendor_location_id()
+        warehouse_id = self._warehouse_for_location(dest_location_id)
+        picking_type = self._incoming_picking_type_id(warehouse_id)
+
+        product_row = self.client.read("product.product", [product_id], ["uom_id", "display_name"])[0]
+        uom_id = self._normalize_many2one_id(product_row.get("uom_id"))
+
+        picking_id = self.client.create("stock.picking", self._filter_values("stock.picking", {
+            "picking_type_id": picking_type,
+            "location_id": vendor_loc,
+            "location_dest_id": dest_location_id,
+            "origin": f"HA-SEED receipt {product_ref}",
+        }))
+
+        move_values = {
+            "name": f"HA-SEED {product_ref}",
+            "product_id": product_id,
+            "product_uom_qty": qty,
+            "product_uom": uom_id,
+            "picking_id": picking_id,
+            "location_id": vendor_loc,
+            "location_dest_id": dest_location_id,
+        }
+        self.client.create("stock.move", self._filter_values("stock.move", move_values))
+
+        # Confirm + assign + validate.
+        for method in ("action_confirm", "action_assign"):
+            try:
+                self.client.execute_kw("stock.picking", method, [[picking_id]])
+            except OdooRPCError:
+                pass
+
+        # Mark all move lines as fully done.
+        moves = self.client.search_read(
+            "stock.move",
+            [["picking_id", "=", picking_id]],
+            ["id", "product_uom_qty", "product_uom", "product_id"],
+        )
+        for move in moves:
+            move_line_ids = self.client.search("stock.move.line", [["move_id", "=", move["id"]]])
+            qty_done_field = "qty_done" if "qty_done" in self._fields("stock.move.line") else "quantity"
+            if move_line_ids:
+                self.client.write("stock.move.line", move_line_ids, {qty_done_field: move["product_uom_qty"]})
+            else:
+                ml_values = {
+                    "move_id": move["id"],
+                    "product_id": self._normalize_many2one_id(move.get("product_id")),
+                    "product_uom_id": self._normalize_many2one_id(move.get("product_uom")),
+                    qty_done_field: move["product_uom_qty"],
+                    "location_id": vendor_loc,
+                    "location_dest_id": dest_location_id,
+                }
+                self.client.create("stock.move.line", self._filter_values("stock.move.line", ml_values))
+
+        try:
+            self.client.execute_kw("stock.picking", "button_validate", [[picking_id]])
+        except OdooRPCError as exc:
+            print(f"  Warning: button_validate failed for picking {picking_id} ({product_ref}): {exc}")
+
+    def _normalize_many2one_id(self, value: Any) -> int | None:
+        if isinstance(value, list) and value:
+            return value[0]
+        if isinstance(value, int):
+            return value
+        return None
+
+    def _set_reserved_quantity(
+        self,
+        product_ref: str,
+        reserved: float,
+        location_id: int,
+    ) -> None:
+        """Force-write reserved_quantity on the (product, location) quant.
+
+        Used to mimic 'this many units are already locked by previous orders'
+        without going through the SO confirmation path.
+        """
+        if reserved <= 0:
+            return
+        if product_ref not in self.product_product_ids:
+            return
+        product_id = self.product_product_ids[product_ref]
+        quant_ids = self.client.search(
+            "stock.quant",
+            [["product_id", "=", product_id], ["location_id", "=", location_id]],
+            limit=1,
+        )
+        if not quant_ids:
+            return
+        quant_fields = self._fields("stock.quant")
+        if "reserved_quantity" in quant_fields:
+            self.client.write("stock.quant", quant_ids, {"reserved_quantity": reserved})
 
     def _model_exists(self, model: str) -> bool:
         """Return whether an Odoo model is available in this database."""
@@ -457,8 +635,12 @@ class DatabaseFurnisher:
         state: str = "draft",
         order_date: str | None = None,
         note: str = "",
+        warehouse: str = "QT",
     ) -> int | None:
-        """Get or create a sale order using client_order_ref/note as a stable logical ref."""
+        """Get or create a sale order using client_order_ref/note as a stable logical ref.
+
+        `warehouse` selects the SO's home store: 'QT' (default, 前滩) or 'HT' (后滩).
+        """
         if not self._model_exists("sale.order"):
             return None
         if customer_ref not in self.partner_ids:
@@ -499,6 +681,11 @@ class DatabaseFurnisher:
             values["date_order"] = f"{order_date} 10:00:00"
         if "client_order_ref" in so_fields:
             values["client_order_ref"] = ref
+        if "warehouse_id" in so_fields:
+            self._setup_stores_qt_ht()
+            wh_id = self.warehouse_ht_id if warehouse.upper() == "HT" else self.warehouse_qt_id
+            if wh_id:
+                values["warehouse_id"] = wh_id
 
         so_id = self.client.create("sale.order", self._filter_values("sale.order", values))
         self.sale_order_ids[ref] = so_id
@@ -1496,33 +1683,68 @@ class DatabaseFurnisher:
             },
             {
                 "ref": "CUST-005",
-                "name": "Kobayashi Sora",
-                "email": "sora.k@email.com",
-                "phone": "080-5555-6666",
-                "credit_limit": 1500.00,
-                "comment": "New customer, no history",
+                "name": "Kobayashi Ren",
+                "email": "k.ren@email.com",
+                "phone": "080-2222-3333",
+                "credit_limit": 2000.00,
+                "comment": "Expanded benchmark customer: discount/refund ambiguity",
                 "is_customer": True,
             },
-            # Vendors
             {
                 "ref": "CUST-006",
-                "name": "Chen Wei",
-                "email": "w.chen@business.cn",
-                "phone": "+86-138-0001",
-                "credit_limit": None,
-                "comment": "Supplier: Electronics",
-                "is_customer": False,
-                "is_vendor": True,
+                "name": "Yamamoto Sora",
+                "email": "s.yamamoto@email.com",
+                "phone": "080-4444-5555",
+                "credit_limit": 3000.00,
+                "comment": "Expanded benchmark customer: partial delivery task",
+                "is_customer": True,
             },
             {
                 "ref": "CUST-007",
-                "name": "Park Jimin",
-                "email": "jimin.p@supply.kr",
-                "phone": "+82-10-9999",
-                "credit_limit": None,
-                "comment": "Supplier: Accessories",
-                "is_customer": False,
-                "is_vendor": True,
+                "name": "Fujita Kenji",
+                "email": "fujita.k@techcorp.com",
+                "phone": "080-1212-3434",
+                "credit_limit": 4000.00,
+                "comment": "Existing customer with same name as CRM lead",
+                "is_customer": True,
+            },
+            {
+                "ref": "CUST-008",
+                "name": "Hayashi Corp",
+                "email": "ops@hayashi-corp.example.com",
+                "phone": "03-5555-1010",
+                "credit_limit": 12000.00,
+                "comment": "Corporate customer for opportunity conversion",
+                "is_customer": True,
+                "company_type": "company",
+            },
+            # Multi-store fixtures (S-9 / S-10 / S-11) — see research/tasks.py.
+            {
+                "ref": "CUST-009",
+                "name": "Suzuki Kenta",
+                "email": "k.suzuki@example.com",
+                "phone": "080-2200-3300",
+                "credit_limit": 4000.00,
+                "comment": "S-9 walk-in customer at QT (前滩); single-store fulfillable",
+                "is_customer": True,
+            },
+            {
+                "ref": "CUST-010",
+                "name": "Yamada Haruki",
+                "email": "h.yamada@example.com",
+                "phone": "080-4400-5500",
+                "credit_limit": 6000.00,
+                "comment": "S-10 customer at QT (前滩); needs HT→QT transfer",
+                "is_customer": True,
+            },
+            {
+                "ref": "CUST-011",
+                "name": "Mori Kaori",
+                "email": "k.mori@example.com",
+                "phone": "080-6600-7700",
+                "credit_limit": 3000.00,
+                "comment": "S-11 customer with draft SO blocked by network-wide shortage",
+                "is_customer": True,
             },
         ]
 
@@ -1557,6 +1779,9 @@ class DatabaseFurnisher:
             if customer.get("is_vendor"):
                 values["supplier_rank"] = 1
 
+            if customer.get("company_type"):
+                values["company_type"] = customer["company_type"]
+
             partner_id = self.client.create("res.partner", values)
             self.partner_ids[ref] = partner_id
             print(f"  Created partner: {customer['name']} ({customer['email']}) (ID: {partner_id})")
@@ -1564,94 +1789,74 @@ class DatabaseFurnisher:
         print(f"  Total partners: {len(self.partner_ids)}")
 
     def inject_stock_levels(self) -> None:
-        """Inject stock levels with edge cases (out of stock, reserved, etc.)."""
-        print("\n=== Injecting Stock Levels ===")
+        """Inject stock across the dual-store (QT / HT) layout.
 
-        stock_location_id = self._get_stock_location()
-        print(f"  Using stock location ID: {stock_location_id}")
+        For every product the seed targets, stock is **received via a real
+        incoming stock.picking** (Virtual/Vendors → WH-XX/Stock). No
+        `inventory_quantity` / `action_apply_inventory` flow is used, so the
+        Virtual/Inventory adjustment ledger stays untouched. Reserved
+        quantities are mimicked by directly overwriting the freshly-created
+        quant's `reserved_quantity` field (representing units already locked
+        by pre-existing orders).
 
-        # Stock data: (product_ref, on_hand, reserved)
-        # Available = on_hand - reserved
-        stock_data = [
-            ("PROD-001", 3, 2),     # SGS24U: 1 available
-            ("PROD-002", 15, 0),    # SGS24: 15 available
-            ("PROD-003", 0, 0),     # SGS24FE: OUT OF STOCK
-            ("PROD-004", 8, 3),     # IP16P: 5 available
-            ("PROD-005", 25, 0),    # IP16: 25 available
-            ("PROD-010", 100, 5),   # USBC-1M: 95 available
-            ("PROD-011", 100, 0),   # USBC-2M: 100 available
-            ("PROD-012", 2, 2),     # USBC-LTN: 0 available (ALL RESERVED)
-            ("PROD-013", 50, 0),    # USBC-CHG25: 50 available
-            ("PROD-014", 0, 0),     # USBC-CHG65: OUT OF STOCK
-            ("PROD-020", 4, 1),     # DYS-V15: 3 available
-            ("PROD-021", 0, 0),     # DYS-V12: OUT OF STOCK
-            ("PROD-022", 7, 0),     # DYS-PURE: 7 available
-            ("PROD-030", 20, 0),    # HGIFT: 20 available
-            ("PROD-031", 0, 0),     # BTS: DISCONTINUED (0 stock)
+        Distribution table — see codebook G-05/I-10/I-11 for the cross-store
+        protocol the agents are evaluated on.
+        """
+        print("\n=== Injecting Stock Levels (dual-store QT / HT) ===")
+
+        qt_loc, ht_loc = self._setup_stores_qt_ht()
+
+        # Format: (product_ref, qt_on_hand, qt_reserved, ht_on_hand, ht_reserved)
+        # Plan B distribution for products that drive multi-store tasks (S-9/10/11
+        # and legacy S-1/S-2). Products NOT in this table default to QT-only with
+        # the legacy single values, preserving older single-store task behavior.
+        # PROD-010 / PROD-012 are intentionally omitted here — their final QT
+        # value is set later by inject_expanded_task_data; multi-store extensions
+        # for those products can be added when a task actually needs them.
+        plan_b: list[tuple[str, float, float, float, float]] = [
+            ("PROD-001", 3, 2, 5, 0),    # SGS24U: QT=1 avail, HT=5 avail (single-store ok)
+            ("PROD-002", 0, 0, 10, 0),   # SGS24: QT empty → must transfer from HT (S-10)
+            ("PROD-003", 0, 0, 0, 0),    # SGS24FE: network-wide shortage (S-11)
+            ("PROD-004", 8, 3, 4, 0),    # IP16P: QT alone fulfillable (S-9)
+            ("PROD-020", 4, 1, 1, 0),    # DYS-V15: QT=3, HT=1, total=4 → can't fulfill 5 (S-2)
         ]
 
-        # Check which fields are available on stock.quant
-        quant_fields = self.client.execute_kw("stock.quant", "fields_get", [], {})
-        use_inventory_quantity = "inventory_quantity" in quant_fields
+        legacy_qt_only: list[tuple[str, float, float]] = [
+            ("PROD-005", 25, 0),
+            ("PROD-010", 100, 5),    # final QT value is overridden later by expanded seed
+            ("PROD-011", 100, 0),    # final QT value is overridden later by expanded seed
+            ("PROD-012", 2, 2),      # final QT value is overridden later by expanded seed
+            ("PROD-013", 50, 0),     # final QT value is overridden later by expanded seed
+            ("PROD-014", 0, 0),
+            ("PROD-021", 0, 0),
+            ("PROD-022", 7, 0),
+            ("PROD-030", 20, 0),
+            ("PROD-031", 0, 0),
+        ]
 
-        for ref, on_hand, reserved in stock_data:
+        for ref, qt_on, qt_res, ht_on, ht_res in plan_b:
             if ref not in self.product_product_ids:
-                print(f"  Warning: Product {ref} not found, skipping stock")
+                print(f"  Warning: Product {ref} not in seed, skipping stock")
                 continue
-
-            product_id = self.product_product_ids[ref]
-
-            # Check if quant already exists
-            existing = self.client.search(
-                "stock.quant",
-                [
-                    ["product_id", "=", product_id],
-                    ["location_id", "=", stock_location_id],
-                ],
-                limit=1
+            self._receive_stock_via_picking(ref, qt_on, qt_loc)
+            self._receive_stock_via_picking(ref, ht_on, ht_loc)
+            self._set_reserved_quantity(ref, qt_res, qt_loc)
+            self._set_reserved_quantity(ref, ht_res, ht_loc)
+            print(
+                f"  {ref}: QT(on={qt_on},res={qt_res},avail={qt_on - qt_res}) "
+                f"HT(on={ht_on},res={ht_res},avail={ht_on - ht_res})"
             )
 
-            if existing:
-                # Update existing quant
-                if use_inventory_quantity:
-                    self.client.write("stock.quant", existing, {"inventory_quantity": on_hand})
-                    try:
-                        self.client.execute_kw("stock.quant", "action_apply_inventory", [existing])
-                    except OdooRPCError:
-                        pass
-                else:
-                    self.client.write("stock.quant", existing, {"quantity": on_hand})
-
-                # Set reserved quantity if needed
-                if reserved > 0:
-                    self.client.write("stock.quant", existing, {"reserved_quantity": reserved})
-
-                print(f"  Updated stock for {ref}: on_hand={on_hand}, reserved={reserved}, available={on_hand - reserved}")
-            else:
-                # Create new quant
-                values = {
-                    "product_id": product_id,
-                    "location_id": stock_location_id,
-                }
-
-                if use_inventory_quantity:
-                    values["inventory_quantity"] = on_hand
-                else:
-                    values["quantity"] = on_hand
-
-                quant_id = self.client.create("stock.quant", values)
-
-                if use_inventory_quantity:
-                    try:
-                        self.client.execute_kw("stock.quant", "action_apply_inventory", [[quant_id]])
-                    except OdooRPCError:
-                        pass
-
-                # Set reserved quantity if needed
-                if reserved > 0:
-                    self.client.write("stock.quant", [quant_id], {"reserved_quantity": reserved})
-
-                print(f"  Created stock for {ref}: on_hand={on_hand}, reserved={reserved}, available={on_hand - reserved}")
+        for ref, on_hand, reserved in legacy_qt_only:
+            if ref not in self.product_product_ids:
+                print(f"  Warning: Product {ref} not in seed, skipping stock")
+                continue
+            self._receive_stock_via_picking(ref, on_hand, qt_loc)
+            self._set_reserved_quantity(ref, reserved, qt_loc)
+            print(
+                f"  {ref}: QT(on={on_hand},res={reserved},avail={on_hand - reserved}) "
+                f"HT(on=0,res=0,avail=0)"
+            )
 
     def inject_sales_orders(self) -> None:
         """Inject pre-existing sales orders for task context."""
@@ -1697,11 +1902,23 @@ class DatabaseFurnisher:
             {
                 "ref": "SO-005",
                 "customer_ref": "CUST-005",
-                "product_ref": "PROD-030",  # HGIFT
-                "qty": 5,
+                "product_ref": "PROD-002",  # SGS24 — draft quotation for Kobayashi Ren
+                "qty": 1,
                 "state": "draft",
                 "date": "2025-12-15",
-                "note": "New customer",
+                "note": "Draft quotation eligible for 10% seasonal discount",
+            },
+            {
+                # S-11 fixture: draft SO for a product with network-wide shortage.
+                # The agent should propose cancellation per S-09 / S-10 / I-12.
+                "ref": "SO-011-DRAFT-FE",
+                "customer_ref": "CUST-011",
+                "product_ref": "PROD-003",  # SGS24FE — 0 stock at both QT and HT
+                "qty": 1,
+                "state": "draft",
+                "date": "2026-04-25",
+                "note": "Draft awaiting fulfillment check; SGS24FE network shortage",
+                "warehouse": "QT",
             },
         ]
 
@@ -1754,8 +1971,17 @@ class DatabaseFurnisher:
                     }]
                 ],
             }
+            # Pin the home store. Default seeded SOs live at QT (前滩) unless
+            # the order dict explicitly opts into HT.
+            so_fields = self._fields("sale.order")
+            if "warehouse_id" in so_fields:
+                self._setup_stores_qt_ht()
+                wh_code = (order.get("warehouse") or "QT").upper()
+                wh_id = self.warehouse_ht_id if wh_code == "HT" else self.warehouse_qt_id
+                if wh_id:
+                    so_values["warehouse_id"] = wh_id
 
-            so_id = self.client.create("sale.order", so_values)
+            so_id = self.client.create("sale.order", self._filter_values("sale.order", so_values))
             self.sale_order_ids[ref] = so_id
 
             # Handle state transitions
@@ -1802,11 +2028,11 @@ class DatabaseFurnisher:
             },
             {
                 "ref": "LEAD-02",
-                "name": "Yamamoto Rin",
-                "email": "rin.y@enterprise.co.jp",
-                "phone": "03-1234-5678",
-                "expected_revenue": 25000.00,
-                "description": "Enterprise deal",
+                "name": "Fujita Kenji",
+                "email": "fujita.k@prospect.com",
+                "phone": "080-5656-7777",
+                "expected_revenue": 2500.00,
+                "description": "Prospect with same name as existing customer",
             },
             {
                 "ref": "LEAD-03",
@@ -1966,7 +2192,7 @@ class DatabaseFurnisher:
         print(f"  Total invoices: {len(self.invoice_ids)}")
 
     def inject_expanded_task_data(self) -> None:
-        """Inject additional records required by tasks_added.py.
+        """Inject additional records required by the research.tasks registry.
 
         The expanded benchmark adds ambiguity traps across CRM, POS, HR,
         Helpdesk, Purchase, Manufacturing, and Project.  Some of those modules
@@ -1999,43 +2225,12 @@ class DatabaseFurnisher:
         ]:
             self._get_or_create_user(ref, name, login, email)
 
-        self._get_or_create_partner(
-            "EXP-CUST-KOBAYASHI-REN",
-            "Kobayashi Ren",
-            "k.ren@email.com",
-            "080-2222-3333",
-            credit_limit=2000,
-            comment="Expanded benchmark customer: discount/refund ambiguity",
-            tier="silver",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-YAMAMOTO-SORA",
-            "Yamamoto Sora",
-            "s.yamamoto@email.com",
-            "080-4444-5555",
-            credit_limit=3000,
-            comment="Expanded benchmark customer: partial delivery task",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-FUJITA-KENJI",
-            "Fujita Kenji",
-            "fujita.k@techcorp.com",
-            "080-1212-3434",
-            credit_limit=4000,
-            comment="Existing customer with same name as CRM lead",
-        )
-        self._get_or_create_partner(
-            "EXP-CUST-HAYASHI-CORP",
-            "Hayashi Corp",
-            "ops@hayashi-corp.example.com",
-            "03-5555-1010",
-            credit_limit=12000,
-            comment="Corporate customer for opportunity conversion",
-            company_type="company",
-        )
+        # CUST-005/006/007/008 are now created in inject_customers.
+        # Assign silver tier to CUST-005 (Kobayashi Ren) here.
+        if "CUST-005" in self.partner_ids:
+            self._assign_partner_tier(self.partner_ids["CUST-005"], "silver")
 
-        # C-2 and P-2 conflict on Watanabe's starting tier in the shared DB.
-        # Keep the CRM task baseline explicit: bronze, then agents can upgrade.
+        # C-2 baseline: Watanabe Mei starts at bronze so agent can upgrade her.
         if "CUST-004" in self.partner_ids:
             self._assign_partner_tier(self.partner_ids["CUST-004"], "bronze")
 
@@ -2068,17 +2263,10 @@ class DatabaseFurnisher:
         self._set_stock_level("PROD-013", 8, 3)
         self._set_stock_level("PROD-011", 0, 0, secondary_location_id)
 
-        self._get_or_create_sale_order(
-            "SO-005",
-            "EXP-CUST-KOBAYASHI-REN",
-            [("PROD-002", 1, None)],
-            state="draft",
-            order_date=today_s,
-            note="Draft quotation eligible for 10% seasonal discount",
-        )
+        # SO-005 is created in inject_sales_orders (CUST-005/PROD-002/draft).
         self._get_or_create_sale_order(
             "SO-006",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-010", 2, None)],
             state="sale",
             order_date=today_s,
@@ -2086,7 +2274,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "SO-007",
-            "EXP-CUST-YAMAMOTO-SORA",
+            "CUST-006",
             [("PROD-013", 8, None)],
             state="draft",
             order_date=today_s,
@@ -2102,7 +2290,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "SO-009-POS-AMBIG",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 1, None)],
             state="sale",
             order_date=today_s,
@@ -2113,16 +2301,7 @@ class DatabaseFurnisher:
         # CRM records.
         # ------------------------------------------------------------------
         print("\n--- Expanded CRM ---")
-        self._get_or_create_crm_lead(
-            "LEAD-02-FUJITA",
-            "Lead: Fujita Kenji",
-            "Fujita Kenji",
-            "fujita.k@prospect.com",
-            "080-5656-7777",
-            2500,
-            lead_type="lead",
-            description="Prospect with same name as existing customer",
-        )
+        # LEAD-02 (Fujita Kenji) is now created in inject_crm_leads.
         self._get_or_create_crm_lead(
             "OP-001",
             "OP-001 Hayashi Corp Starter Deal",
@@ -2130,7 +2309,7 @@ class DatabaseFurnisher:
             "buyer@hayashi-corp.example.com",
             "03-5555-2020",
             4500,
-            partner_ref="EXP-CUST-HAYASHI-CORP",
+            partner_ref="CUST-008",
             lead_type="opportunity",
             description="Active opportunity for IP16P x3",
             user_ref="USER-001",
@@ -2143,7 +2322,7 @@ class DatabaseFurnisher:
             "lost@hayashi-corp.example.com",
             "03-5555-2021",
             3000,
-            partner_ref="EXP-CUST-HAYASHI-CORP",
+            partner_ref="CUST-008",
             lead_type="opportunity",
             description="Already lost opportunity; must not be reassigned",
             user_ref="USER-001",
@@ -2199,7 +2378,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-003",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-030", 1, 300.00)],
             invoice_date="2026-01-05",
             due_date="2026-01-31",
@@ -2207,7 +2386,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-004",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-031", 1, 250.00)],
             invoice_date="2026-01-06",
             due_date="2026-01-31",
@@ -2232,7 +2411,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_invoice(
             "INV-MONTH-003",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 2, 29.99)],
             invoice_date=(last_month_start + timedelta(days=10)).isoformat(),
             due_date=last_month_end.isoformat(),
@@ -2266,7 +2445,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_pos_order(
             "POS-004",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-005", 1, None, 0)],
             "draft",
             f"{today_s} 12:00:00",
@@ -2274,14 +2453,14 @@ class DatabaseFurnisher:
         )
         self._get_or_create_pos_order(
             "POS-005",
-            "EXP-CUST-KOBAYASHI-REN",
+            "CUST-005",
             [("PROD-013", 1, None, 0)],
             "done",
             f"{today_s} 13:00:00",
         )
         self._get_or_create_pos_order("POS-006", "CUST-001", [("PROD-010", 2, None, 0)], "done", f"{today_s} 14:00:00")
         self._get_or_create_pos_order("POS-007", "CUST-004", [("PROD-030", 3, None, 0)], "done", f"{today_s} 15:00:00")
-        self._get_or_create_pos_order("POS-008", "EXP-CUST-FUJITA-KENJI", [("PROD-011", 2, None, 0)], "done", f"{today_s} 16:00:00")
+        self._get_or_create_pos_order("POS-008", "CUST-007", [("PROD-011", 2, None, 0)], "done", f"{today_s} 16:00:00")
         self._get_or_create_pos_order("POS-REF-001", "CUST-003", [("PROD-013", -1, None, 0)], "done", f"{today_s} 17:00:00")
 
         # ------------------------------------------------------------------
@@ -2448,7 +2627,7 @@ class DatabaseFurnisher:
         )
         self._get_or_create_sale_order(
             "NOISE-SO-YAMAMOTO-65W",
-            "EXP-CUST-YAMAMOTO-SORA",
+            "CUST-006",
             [("PROD-014", 2, None)],
             state="draft",
             order_date=today_s,
@@ -2472,6 +2651,16 @@ class DatabaseFurnisher:
         )
 
         print("\n--- Noise CRM ---")
+        self._get_or_create_crm_lead(
+            "NOISE-LEAD-YAMAMOTO-RIN",
+            "Lead: Yamamoto Rin",
+            "Yamamoto Rin",
+            "rin.y@enterprise.co.jp",
+            "03-1234-5678",
+            25000,
+            lead_type="lead",
+            description="Noise enterprise lead; not referenced by any task",
+        )
         self._get_or_create_crm_lead(
             "NOISE-LEAD-FUJITA-KENJIRO",
             "Lead: Fujita Kenjiro",
