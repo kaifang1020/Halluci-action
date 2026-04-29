@@ -535,24 +535,79 @@ class OdooToolExecutor:
         }
 
     def check_stock(self, product_id: int, location_id: int | None = None) -> dict[str, Any]:
+        """Return on-hand / reserved / available stock for a product.
+
+        - Only `stock.location.usage = 'internal'` locations are counted.
+          Virtual locations (vendors, customers, inventory adjustment,
+          production, transit) are explicitly excluded; they represent
+          double-entry bookkeeping, not physical stock.
+        - When `location_id` is given, the response is limited to that
+          single internal location. Passing a non-internal location id
+          raises an error to prevent stock figures from being polluted by
+          virtual quants.
+        - When `location_id` is omitted, all internal locations across
+          warehouses are aggregated; per-store figures are returned in
+          `by_location` so multi-store callers can reason about each
+          warehouse independently.
+        """
         self._ensure_model("stock.quant")
-        domain: list[Any] = [["product_id", "=", product_id]]
+
         if location_id is not None:
-            domain.append(["location_id", "=", location_id])
+            loc = self.client.read(
+                "stock.location", [location_id], ["usage", "complete_name"]
+            )
+            if not loc or loc[0].get("usage") != "internal":
+                raise OdooRPCError(
+                    f"Location {location_id} is not an internal stock location; "
+                    "check_stock only operates on internal warehouse locations."
+                )
+            domain: list[Any] = [
+                ["product_id", "=", product_id],
+                ["location_id", "=", location_id],
+            ]
+        else:
+            internal_ids = self.client.search(
+                "stock.location", [["usage", "=", "internal"]]
+            )
+            if not internal_ids:
+                raise OdooRPCError("No internal stock locations exist.")
+            domain = [
+                ["product_id", "=", product_id],
+                ["location_id", "in", internal_ids],
+            ]
+
         quants = self.client.search_read(
             "stock.quant",
             domain,
-            ["product_id", "location_id", "quantity", "reserved_quantity"],
+            ["location_id", "quantity", "reserved_quantity"],
         )
-        on_hand = sum(float(quant.get("quantity") or 0.0) for quant in quants)
-        reserved = sum(float(quant.get("reserved_quantity") or 0.0) for quant in quants)
+
+        by_location: dict[int, dict[str, Any]] = {}
+        for q in quants:
+            loc_field = q.get("location_id") or [None, None]
+            loc_id = loc_field[0] if isinstance(loc_field, list) else loc_field
+            loc_name = loc_field[1] if isinstance(loc_field, list) and len(loc_field) > 1 else None
+            bucket = by_location.setdefault(loc_id, {
+                "location_id": loc_id,
+                "location_name": loc_name,
+                "on_hand": 0.0,
+                "reserved": 0.0,
+            })
+            bucket["on_hand"] += float(q.get("quantity") or 0.0)
+            bucket["reserved"] += float(q.get("reserved_quantity") or 0.0)
+        for bucket in by_location.values():
+            bucket["available"] = bucket["on_hand"] - bucket["reserved"]
+
+        total_on_hand = sum(b["on_hand"] for b in by_location.values())
+        total_reserved = sum(b["reserved"] for b in by_location.values())
+
         return {
             "product_id": product_id,
             "location_id": location_id,
-            "on_hand": on_hand,
-            "reserved": reserved,
-            "available": on_hand - reserved,
-            "quants": quants,
+            "on_hand": total_on_hand,
+            "reserved": total_reserved,
+            "available": total_on_hand - total_reserved,
+            "by_location": list(by_location.values()),
         }
 
     def update_inventory(self, product_id: int, quantity: float, location_id: int | None = None) -> dict[str, Any]:
@@ -1102,6 +1157,47 @@ class OdooToolExecutor:
             "state": updated[0].get("state") if updated else None,
             "success": True,
             "message": "Order confirmed successfully.",
+        }
+
+    def cancel_sale_order(self, order_id: int, reason: str) -> dict[str, Any]:
+        """Cancel a sale order via action_cancel and log the reason on the chatter."""
+        self._ensure_model("sale.order")
+        if not reason or not reason.strip():
+            raise ValueError("reason is required when cancelling a sale order.")
+        order = self.client.read("sale.order", [order_id], ["name", "state"])
+        if not order:
+            raise OdooRPCError(f"Sale order {order_id} was not found.")
+        prior_state = order[0].get("state")
+        if prior_state == "cancel":
+            return {
+                "order_id": order_id,
+                "name": order[0].get("name"),
+                "state": "cancel",
+                "success": False,
+                "message": "Order is already cancelled.",
+                "reason": reason,
+            }
+        try:
+            self.client.execute_kw("sale.order", "action_cancel", [[order_id]])
+        except OdooRPCError as exc:
+            return {
+                "order_id": order_id,
+                "name": order[0].get("name"),
+                "state": prior_state,
+                "success": False,
+                "message": f"Odoo refused to cancel: {exc}",
+                "reason": reason,
+            }
+        self._post_message("sale.order", order_id, f"Order cancelled. Reason: {reason}")
+        updated = self.client.read("sale.order", [order_id], ["name", "state"])
+        return {
+            "order_id": order_id,
+            "name": updated[0].get("name") if updated else None,
+            "state": updated[0].get("state") if updated else None,
+            "prior_state": prior_state,
+            "success": True,
+            "message": "Order cancelled successfully.",
+            "reason": reason,
         }
 
     def create_sale_order(
