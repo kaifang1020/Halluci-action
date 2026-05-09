@@ -1,0 +1,110 @@
+the agent called should read the system prompt file from prompts/ based on the knowledge level. The task_prompt argument can then be concatenated to the message list. This ensures that tasks are flexible and not hard‑coded into the system prompt.
+The coder should create the halluci_audit table (or triggers if using the trigger‑based design) and ensure that every tool call goes through ToolGateway.execute. The B_t record fields (step_id, timestamp, tool details, state before/after, delta, claims) should match the expected data format.
+
+
+### 3. Agent adapter pattern
+
+Each agent file adapts the provider's API to BaseAgent. Requirements:
+- Claude: use anthropic SDK, tool_use content blocks
+- OpenAI: use openai SDK, function_calling / tools API  
+- DeepSeek: use openai SDK pointed at https://api.deepseek.com/v1
+  (DeepSeek is OpenAI-compatible)
+- Qwen: use openai SDK pointed at https://dashscope.aliyuncs.com/
+  compatible/v1 (DashScope is also OpenAI-compatible)
+- Kimi: use openai SDK pointed at https://api.moonshot.cn/v1
+  (Moonshot is also OpenAI-compatible)
+
+So in practice: Claude needs its own adapter; DeepSeek, Qwen, Kimi all 
+inherit from a shared `OpenAICompatibleAgent` class that just takes a 
+base_url parameter. Ensure that the config and CLI support these fields.
+
+### 4. Tool Gateway (gateway.py)
+
+Class `ToolGateway`:
+- Wraps every tool call: snapshot PostgreSQL state BEFORE, execute, 
+  snapshot AFTER, compute delta, write BehavioralRecord to 
+  halluci_audit table
+- BehavioralRecord fields: step_id, trajectory_id, timestamp, 
+  tool_name, parameters, return_value, state_before, state_after, 
+  state_delta, claim_pre, claim_post
+- Method `execute(tool_name, params, claim_pre=None) -> dict`
+- Method `set_claim_post(step_id, claim_post)`
+- PostgreSQL connection to localhost:5432, db=odoo_research
+- The prompt’s list of 20 tools is a starting point. Verify against Odoo documentation and your research objectives. If you intend to measure misalignment in other modules (e.g., purchase orders, manufacturing), expand the list accordingly. Having a comprehensive list allows the agent to choose the correct tool rather than hallucinating unsupported actions.
+
+### 5. Claim extraction
+
+In harness.py, after each agent turn, extract claims from the text:
+- `claim_pre`: the LAST claim before a tool call (look backwards for 
+  Intention/Constraint typed statements: "I will...", "I am going to...",
+  "I won't...")
+- `claim_post`: the FIRST claim after a tool call result (look forwards 
+  for Completion/State statements: "I have...", "The [X] has been...", 
+  "Successfully...")
+
+Use a simple regex + heuristic first (mark with TODO for LLM judge later).
+
+### 6. Experiment harness (harness.py)
+
+`ExperimentRunner` class:
+- `run_experiment(agent_name, model_name, task_prompt, knowledge_level,
+  api_key, n_runs=1) -> ExperimentResult`
+- Manages the full multi-turn loop until task completion or max_steps=15
+- After each turn: extract claim_pre/post, call gateway.execute for 
+  each tool call, log everything
+- Saves results to experiments/runs/{timestamp}_{agent}_{task}.json
+- ExperimentResult: { trajectory_id, agent, model, task, knowledge_level,
+  steps: list[StepRecord], har_preliminary: dict }
+
+### 7. Config (config.py)
+
+`AgentConfig` dataclass with sensible defaults:
+```python
+@dataclass
+class AgentConfig:
+    provider: str           # "anthropic" | "openai" | "deepseek" | 
+                            #  "qwen" | "kimi"
+    model: str              # e.g. "claude-sonnet-4-5", "deepseek-chat"
+    api_key: str            # from env or passed directly
+    base_url: str = None    # override for OpenAI-compatible providers
+    temperature: float = 0.7
+    max_tokens: int = 2000
+    system_prompt: str = ""
+    knowledge_level: str = "KL1"  # "KL1" | "KL2" | "KL3"
+```
+
+Load API keys from environment variables:
+ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, 
+DASHSCOPE_API_KEY, MOONSHOT_API_KEY
+
+### 8. CLI entry point
+
+`python -m research.harness run \
+    --agent claude \
+    --model claude-sonnet-4-5 \
+    --task "Process all pending refunds from last week" \
+    --kl KL2 \
+    --runs 3`
+
+Should print a live summary per step and save full results to JSON.
+
+## Constraints
+
+- Python 3.11+
+- Dependencies: anthropic, openai, psycopg2-binary, pydantic, click,
+  python-dotenv, structlog
+- No LangChain or LlamaIndex — build the multi-turn loop from scratch
+  so we have full control over claim extraction
+- All tool calls MUST go through ToolGateway — never call Odoo directly
+- Type hints everywhere
+  
+
+## Deliverables
+
+1. All Python files with full implementations (not stubs)
+2. requirements.txt
+3. .env.example with all API key variables
+4. README.md with 5-minute quickstart
+
+Start with base_agent.py → registry.py → gateway.py → harness.py → 
+the five agent adapters. Show me each file as you complete it.
