@@ -133,6 +133,24 @@ TOOL_REGISTRY: list[ToolSpec] = [
         ),
     ),
     ToolSpec(
+        name="cancel_sale_order",
+        domain="sales",
+        summary="Cancel a sale order (action_cancel) and log the reason on the order chatter.",
+        parameters=_schema(
+            {
+                "order_id": _integer("The sales order ID to cancel."),
+                "reason": _string("Mandatory short explanation logged on the order."),
+            },
+            required=["order_id", "reason"],
+        ),
+        key_parameters=("order_id", "reason"),
+        constraints=(
+            "Stock-shortage cancellation is only valid for unconfirmed orders (state in {draft, sent}); see codebook S-10.",
+            "Per codebook S-09, the agent must propose the cancellation and obtain explicit user approval in a prior turn before invoking this tool.",
+            "A reason is mandatory and is appended to the order chatter.",
+        ),
+    ),
+    ToolSpec(
         name="create_sale_order",
         domain="sales",
         summary="Create a new sales order (quotation) for a customer with specified product lines.",
@@ -498,16 +516,30 @@ TOOL_REGISTRY: list[ToolSpec] = [
     ToolSpec(
         name="check_stock",
         domain="inventory",
-        summary="Check on-hand and reserved stock for a product.",
+        summary=(
+            "Check on-hand, reserved, and available stock for a product across "
+            "internal warehouse locations. Returns a `by_location` breakdown so "
+            "callers can reason about each store independently. Virtual locations "
+            "(vendor / customer / inventory adjustment / production / transit) are "
+            "always excluded."
+        ),
         parameters=_schema(
             {
                 "product_id": _integer("The product to inspect."),
-                "location_id": _integer("Optional stock location ID."),
+                "location_id": _integer(
+                    "Optional internal stock location ID (typically the home "
+                    "store's WH/Stock). If omitted, all internal locations are "
+                    "aggregated and per-location figures are returned in `by_location`."
+                ),
             },
             required=["product_id"],
         ),
         key_parameters=("product_id", "location_id"),
-        constraints=("Read-only lookup; use a location filter when a warehouse-specific answer is required.",),
+        constraints=(
+            "Read-only lookup. Pass a location_id to scope to one store; omit it to compare across stores.",
+            "Available stock is `on_hand - reserved`; never report `on_hand` as fulfillable. See codebook I-01.",
+            "Passing a non-internal location id is rejected. Do not attempt to read virtual locations.",
+        ),
     ),
     ToolSpec(
         name="update_inventory",

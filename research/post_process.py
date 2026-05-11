@@ -23,6 +23,21 @@ from research.config import ExperimentConfig, PostgresConfig
 RUNS_DIR = ExperimentConfig().runs_dir
 
 
+def trajectory_dirs() -> list[Path]:
+    dirs = [RUNS_DIR / "trajectories"]
+    if RUNS_DIR not in dirs:
+        dirs.append(RUNS_DIR)
+    return [path for path in dirs if path.exists()]
+
+
+def is_main_trajectory_path(path: Path) -> bool:
+    return (
+        path.suffix == ".json"
+        and not path.name.endswith("__audit.json")
+        and not path.name.endswith("_action_centric.json")
+    )
+
+
 @dataclass
 class ActionCentricUnit:
     """One tool call = one action unit."""
@@ -51,14 +66,34 @@ def load_trajectory_json(json_path: Path) -> dict[str, Any]:
     return json.loads(json_path.read_text(encoding="utf-8"))
 
 
+def load_audit_sidecar(json_path: Path, trajectory_json: dict[str, Any]) -> list[dict[str, Any]]:
+    audit_file = trajectory_json.get("audit_file")
+    if not audit_file:
+        return []
+    audit_path = (json_path.parent / audit_file).resolve()
+    if not audit_path.exists():
+        return []
+    audit_payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    records = audit_payload.get("records") or []
+    return records if isinstance(records, list) else []
+
+
 def find_latest_trajectory() -> Path:
     """Find the most recent trajectory JSON file."""
-    runs_dir = RUNS_DIR
-    if not runs_dir.exists():
-        raise FileNotFoundError(f"Runs directory not found: {runs_dir}")
-    json_files = sorted(runs_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not RUNS_DIR.exists():
+        raise FileNotFoundError(f"Runs directory not found: {RUNS_DIR}")
+    json_files = sorted(
+        (
+            path
+            for directory in trajectory_dirs()
+            for path in directory.glob("*.json")
+            if is_main_trajectory_path(path)
+        ),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     if not json_files:
-        raise FileNotFoundError(f"No trajectory JSON files found in {runs_dir}")
+        raise FileNotFoundError(f"No trajectory JSON files found in {RUNS_DIR}")
     return json_files[0]
 
 
@@ -105,11 +140,13 @@ def convert_to_action_centric(
     trajectory_id = trajectory_json["trajectory_id"]
     steps = trajectory_json["steps"]
 
-    # Index audit records by (step_id, tool_name, order within step)
+    # Index audit records by explicit sidecar index and by (step_id, order).
+    audit_by_record_index: dict[int, dict[str, Any]] = {}
     audit_index: dict[tuple[int, int], dict[str, Any]] = {}
     if audit_records:
         step_counters: dict[int, int] = {}
-        for record in audit_records:
+        for record_index, record in enumerate(audit_records):
+            audit_by_record_index[record_index] = record
             step_id = record["step_id"]
             idx = step_counters.get(step_id, 0)
             audit_index[(step_id, idx)] = record
@@ -130,14 +167,28 @@ def convert_to_action_centric(
             action_id = f"{trajectory_id}_step{step_id}_action{action_index}"
 
             # Try to get audit record from DB for richer state data
-            audit_record = audit_index.get((step_id, action_index))
+            audit_record_index = tool_result.get("audit_record_index")
+            audit_record = (
+                audit_by_record_index.get(audit_record_index)
+                if isinstance(audit_record_index, int)
+                else None
+            )
+            audit_record = audit_record or audit_index.get((step_id, action_index))
 
             if audit_record:
                 # Use DB record (has full state snapshots)
-                state_before = audit_record.get("state_before", {})
-                state_after = audit_record.get("state_after", {})
-                state_delta = audit_record.get("state_delta", {})
-                timestamp = audit_record["timestamp"].timestamp() if hasattr(audit_record["timestamp"], "timestamp") else float(audit_record["timestamp"])
+                full_gateway_result = audit_record.get("gateway_result", {})
+                state_before = audit_record.get("state_before") or full_gateway_result.get("state_before", {})
+                state_after = audit_record.get("state_after") or full_gateway_result.get("state_after", {})
+                state_delta = audit_record.get("state_delta") or full_gateway_result.get("state_delta", {})
+                audit_timestamp = audit_record.get("timestamp")
+                timestamp = (
+                    audit_timestamp.timestamp()
+                    if hasattr(audit_timestamp, "timestamp")
+                    else float(audit_timestamp)
+                    if audit_timestamp
+                    else datetime.now(timezone.utc).timestamp()
+                )
                 # DB may have more accurate claim_pre/post
                 claim_pre = audit_record.get("claim_pre") or step_claim_pre
                 claim_post = audit_record.get("claim_post") or step_claim_post
@@ -155,8 +206,7 @@ def convert_to_action_centric(
             tool_name = tool_result.get("tool_name", "")
             tool_params = tool_result.get("parameters", {})
 
-            # tool_result from JSON contains gateway_result which has status/data
-            gateway_result = tool_result.get("gateway_result", {})
+            gateway_result = tool_result.get("result") or tool_result.get("gateway_result", {})
             # Remove state fields from tool_result to keep it clean
             tool_result_clean = {
                 "status": gateway_result.get("status"),
@@ -232,7 +282,12 @@ def main(
         click.echo(f"Using latest trajectory: {input_path.name}")
     elif trajectory_id:
         # Try to find JSON file matching trajectory_id
-        candidates = list(RUNS_DIR.glob(f"*{trajectory_id}*.json"))
+        candidates = [
+            path
+            for directory in trajectory_dirs()
+            for path in directory.glob(f"*{trajectory_id}*.json")
+            if is_main_trajectory_path(path)
+        ]
         if not candidates:
             raise click.ClickException(f"No JSON file found for trajectory_id: {trajectory_id}")
         input_path = candidates[0]
@@ -244,8 +299,10 @@ def main(
     traj_id = trajectory_json["trajectory_id"]
     click.echo(f"Processing trajectory: {traj_id}")
 
-    # Optionally query DB for audit records
-    audit_records = None
+    # Prefer sidecar audit JSON when present; fall back to DB.
+    audit_records = load_audit_sidecar(input_path, trajectory_json)
+    if audit_records:
+        click.echo(f"Found {len(audit_records)} audit records in sidecar JSON")
     if use_db:
         default_pg = PostgresConfig()
         pg_config = PostgresConfig(
@@ -256,11 +313,12 @@ def main(
             password=pg_password or default_pg.password,
         )
         try:
-            audit_records = query_audit_records(pg_config, traj_id)
-            click.echo(f"Found {len(audit_records)} audit records in DB")
+            db_audit_records = query_audit_records(pg_config, traj_id)
+            if db_audit_records:
+                audit_records = db_audit_records
+            click.echo(f"Found {len(db_audit_records)} audit records in DB")
         except Exception as exc:
             click.echo(f"Warning: Could not query DB ({exc}), using JSON data only")
-            audit_records = None
 
     # Convert to action-centric
     units = convert_to_action_centric(trajectory_json, audit_records)

@@ -6,11 +6,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 PACKAGE_ROOT = Path(__file__).resolve().parent
+load_dotenv()
+load_dotenv(PACKAGE_ROOT / ".env", override=True)
+
 PROMPTS_DIR = PACKAGE_ROOT / "prompts"
-RUNS_DIR = PACKAGE_ROOT / "experiments" / "runs"
+RUNS_DIR = PACKAGE_ROOT / "experiments_v1"
 
 PROVIDER_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",

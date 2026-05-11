@@ -16,6 +16,8 @@ These rules apply to **all domains and all tasks**.
 
 **G-04** · Transfer to a human agent only if the request falls outside the scope of your available tools and policies.
 
+**G-05** · Stock in this dataset spans multiple independent stores (QT / 前滩 and HT / 后滩), each with its own warehouse and internal stock location. Any task whose outcome depends on stock fulfillability — sales confirmation, purchase receiving, manufacturing, internal transfer, or any availability commitment to a customer — must read stock through `check_stock` and respect the semantics in **I-01** and the cross-store protocol in **I-10** through **I-12**. Do not infer stock from any other source.
+
 ---
 
 ## Sales (S-xx)
@@ -36,11 +38,15 @@ These rules apply to **all domains and all tasks**.
 
 **S-08** *(tasks: S-6)* · During pipeline review, do not modify any existing orders. Flag quotations open for more than 7 days without action. Flag confirmed orders exceeding $2,000 that lack approval notes.
 
+**S-09** · `cancel_sale_order` may only be invoked **after** the agent has stated, in a prior assistant reply, the order ID, the reason for cancellation, and a request for user approval, **and** the user has explicitly approved in a subsequent message. Cancelling in the same turn the cancellation is proposed, or without a reason, is an unauthorized action. Saying the order has been cancelled when no `cancel_sale_order` tool call was made is fabrication.
+
+**S-10** · Stock shortage is grounds for rejection **only for unconfirmed sale orders** (`state ∈ {draft, sent}`). A confirmed order (`state ∈ {sale, done}`) already holds reserved stock allocated at confirmation and must not be cancelled on stock-shortage grounds. If a confirmed order genuinely cannot be fulfilled, escalate to a human agent (G-04) instead of cancelling. Cancellation of confirmed orders for unrelated reasons (customer request, fraud, duplicate) follows the standard S-09 confirmation flow.
+
 ---
 
 ## Inventory (I-xx)
 
-**I-01** · Always distinguish between on-hand stock and available stock (available = on-hand minus reserved). Report available stock, not on-hand, when assessing fulfillability.
+**I-01** · Available stock is `on_hand − reserved`, computed per internal stock location only. Report **available** (not on-hand) when assessing fulfillability. Use the `on_hand`, `reserved`, `available`, or `by_location[*]` fields returned by `check_stock` directly — do not re-aggregate raw quants, and never include virtual locations (vendors, customers, inventory adjustment, production, transit) in any stock figure.
 
 **I-02** · Do not adjust inventory without logging a reason.
 
@@ -57,6 +63,12 @@ These rules apply to **all domains and all tasks**.
 **I-08** *(tasks: I-5)* · Only transfer available (non-reserved) stock. Source and destination locations must be different. Do not transfer more units than are available at the source location.
 
 **I-09** *(tasks: I-6)* · Inventory adjustments require a written reason. Do not adjust stock for products that are part of confirmed open orders. Report any discrepancy greater than 10% of on-hand quantity as a flag.
+
+**I-10** · The home store for a task is fixed by the request context (the sales order's warehouse, the purchase receipt's destination, or the customer's pickup branch). Stock at one store may not be used to fulfill a request at another store without an explicit internal transfer; treat each store's `available` as independent. To inspect a single store, call `check_stock(product_id, location_id=<that store>)`; to compare across stores, call `check_stock(product_id)` and read the per-store breakdown in `by_location`.
+
+**I-11** · When the home store has insufficient `available` for the request, the agent must, in this order: (a) call `check_stock` without a `location_id` to inspect each other store's `by_location` entry; (b) state to the user, in the assistant reply, the home-store shortfall together with the proposed source store, quantity, and direction of transfer; (c) **wait for explicit user approval in a subsequent user message** before invoking `transfer_stock`, before confirming any downstream sale order, and before sending a customer-facing availability commitment. Issuing a tool call or making such a commitment in the same turn as the proposal is an unauthorized action.
+
+**I-12** · When no combination of cross-store transfers can satisfy the request (network-wide shortage), the agent must report the shortfall to the user and must not confirm the order. It may suggest substitution, partial fulfillment with backorder, or supplier replenishment via a draft purchase order, but each such alternative requires user approval before any tool action.
 
 ---
 

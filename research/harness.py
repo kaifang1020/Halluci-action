@@ -37,6 +37,16 @@ FINAL_PATTERNS = [
     re.compile(r"\b(done|completed|finished|all set|task complete)\b", re.IGNORECASE),
 ]
 
+AUDIT_ONLY_TOOL_RESULT_KEYS = {
+    "audit_id",
+    "state_before",
+    "state_after",
+    "state_delta",
+    "claim_pre",
+    "claim_post",
+    "duration_ms",
+}
+
 
 @dataclass(slots=True)
 class ToolExecutionRecord:
@@ -44,6 +54,7 @@ class ToolExecutionRecord:
     tool_name: str
     parameters: dict[str, Any]
     gateway_result: dict[str, Any]
+    agent_visible_result: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -186,12 +197,14 @@ class ExperimentRunner:
                     step_id=step_id,
                     trajectory_id=trajectory_id,
                 )
+                agent_visible_result = redact_audit_fields(tool_result)
                 step_record.tool_results.append(
                     ToolExecutionRecord(
                         call_id=tool_call.call_id,
                         tool_name=tool_call.tool_name,
                         parameters=tool_call.parameters,
                         gateway_result=tool_result,
+                        agent_visible_result=agent_visible_result,
                     )
                 )
                 messages.append(
@@ -199,7 +212,7 @@ class ExperimentRunner:
                         "role": "tool",
                         "tool_call_id": tool_call.call_id,
                         "name": tool_call.tool_name,
-                        "content": json.dumps(tool_result, ensure_ascii=False, default=str),
+                        "content": json.dumps(agent_visible_result, ensure_ascii=False, default=str),
                     }
                 )
                 current_pending_audits.append({"audit_id": tool_result["audit_id"], "step_id": step_id})
@@ -263,13 +276,24 @@ class ExperimentRunner:
         return payload
 
     def _save_result(self, result: ExperimentResult) -> Path:
-        self.experiment_config.runs_dir.mkdir(parents=True, exist_ok=True)
-        task_slug = slugify(result.task)
-        output_path = self.experiment_config.runs_dir / (
-            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{result.agent}_{task_slug}.json"
+        trajectories_dir = self.experiment_config.runs_dir / "trajectories"
+        audits_dir = self.experiment_config.runs_dir / "audits"
+        trajectories_dir.mkdir(parents=True, exist_ok=True)
+        audits_dir.mkdir(parents=True, exist_ok=True)
+        output_path = unique_trajectory_path(
+            trajectories_dir,
+            task_id=result.task_id,
+            agent=result.agent,
+            model=result.model,
         )
-        payload = asdict(result)
+        audit_path = audits_dir / f"{output_path.stem}__audit.json"
+        payload, audit_payload = split_audit_payload(
+            asdict(result),
+            f"../trajectories/{output_path.name}",
+            f"../audits/{audit_path.name}",
+        )
         output_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        audit_path.write_text(json.dumps(audit_payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         return output_path
 
 
@@ -323,6 +347,86 @@ def build_har_preliminary(steps: list[StepRecord]) -> dict[str, Any]:
     }
 
 
+def split_audit_payload(
+    result_payload: dict[str, Any],
+    trajectory_filename: str,
+    audit_filename: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    source_payload = json.loads(json.dumps(result_payload, default=str))
+    audit_payload: dict[str, Any] = {
+        "schema_version": "audit_sidecar_v1",
+        "trajectory_id": result_payload["trajectory_id"],
+        "agent": result_payload["agent"],
+        "model": result_payload["model"],
+        "task_id": result_payload.get("task_id"),
+        "task": result_payload["task"],
+        "knowledge_level": result_payload["knowledge_level"],
+        "source_trajectory": trajectory_filename,
+        "records": [],
+    }
+
+    trajectory_payload: dict[str, Any] = {
+        "schema_version": "trajectory_v2_hidden_audit",
+        "trajectory_id": source_payload["trajectory_id"],
+        "task_id": source_payload.get("task_id"),
+        "task": source_payload["task"],
+        "agent": source_payload["agent"],
+        "model": source_payload["model"],
+        "knowledge_level": source_payload["knowledge_level"],
+        "visibility_condition": "hidden_audit",
+        "audit_file": audit_filename,
+        "steps": source_payload.get("steps", []),
+    }
+
+    for step in trajectory_payload.get("steps", []):
+        step.pop("raw_response", None)
+        step.pop("claim_pre", None)
+        step.pop("claim_post", None)
+        cleaned_tool_results: list[dict[str, Any]] = []
+        for action_index, tool_result in enumerate(step.get("tool_results", [])):
+            action_id = f"step{step.get('step_id')}_action{action_index}"
+            full_gateway_result = tool_result.get("gateway_result", {})
+            agent_visible_result = tool_result.get("agent_visible_result") or redact_audit_fields(full_gateway_result)
+            audit_id = full_gateway_result.get("audit_id")
+
+            audit_payload["records"].append(
+                {
+                    "action_id": action_id,
+                    "step_id": step.get("step_id"),
+                    "call_id": tool_result.get("call_id"),
+                    "tool_name": tool_result.get("tool_name"),
+                    "parameters": tool_result.get("parameters", {}),
+                    "audit_id": audit_id,
+                    "claim_pre": step.get("claim_pre"),
+                    "claim_post": step.get("claim_post"),
+                    "gateway_result": full_gateway_result,
+                }
+            )
+
+            cleaned_tool_results.append(
+                {
+                    "action_id": action_id,
+                    "call_id": tool_result.get("call_id"),
+                    "tool_name": tool_result.get("tool_name"),
+                    "parameters": tool_result.get("parameters", {}),
+                    "result": agent_visible_result,
+                    "audit_record_index": len(audit_payload["records"]) - 1,
+                }
+            )
+        step["tool_results"] = cleaned_tool_results
+
+    return trajectory_payload, audit_payload
+
+
+def redact_audit_fields(tool_result: dict[str, Any]) -> dict[str, Any]:
+    """Return only the tool payload that should be visible to the agent."""
+    return {
+        key: value
+        for key, value in tool_result.items()
+        if key not in AUDIT_ONLY_TOOL_RESULT_KEYS
+    }
+
+
 def truncate_text(text: str, limit: int) -> str:
     compact = re.sub(r"\s+", " ", text or "").strip()
     if len(compact) <= limit:
@@ -333,6 +437,29 @@ def truncate_text(text: str, limit: int) -> str:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", value).strip("_").lower()
     return slug[:48] or "task"
+
+
+def run_file_stem(task_id: str | None, agent: str, model: str) -> str:
+    task_part = slugify(task_id or "custom_task").upper().replace("_", "-")
+    agent_part = slugify(agent)
+    model_part = slugify(model)
+    return f"{task_part}_{agent_part}_{model_part}"
+
+
+def unique_trajectory_path(directory: Path, task_id: str | None, agent: str, model: str) -> Path:
+    stem = run_file_stem(task_id=task_id, agent=agent, model=model)
+    path = directory / f"{stem}.json"
+    if not path.exists() and not (directory.parent / "audits" / f"{stem}__audit.json").exists():
+        return path
+
+    for index in range(2, 1000):
+        candidate_stem = f"{stem}_r{index:02d}"
+        candidate = directory / f"{candidate_stem}.json"
+        audit_candidate = directory.parent / "audits" / f"{candidate_stem}__audit.json"
+        if not candidate.exists() and not audit_candidate.exists():
+            return candidate
+
+    raise FileExistsError(f"Could not find an unused run filename for {stem}")
 
 
 def configure_logging() -> None:
@@ -399,6 +526,7 @@ def cli() -> None:
 @click.option("--pg-password", default=None)
 @click.option("--no-codebook", "use_codebook", is_flag=True, flag_value=False, default=True,
               help="Use per-task explicit constraints instead of the shared codebook.md.")
+@click.option("--runs-dir", "runs_dir", default=None, help="Override output directory for run JSON files.")
 def run(
     agent_name: str,
     model_name: str,
@@ -421,6 +549,7 @@ def run(
     pg_user: str | None,
     pg_password: str | None,
     use_codebook: bool,
+    runs_dir: str | None,
 ) -> None:
     """
     Run a Halluci-Action experiment.
@@ -478,7 +607,8 @@ def run(
         user=pg_user or default_pg.user,
         password=pg_password or default_pg.password,
     )
-    runner = ExperimentRunner(odoo_config=odoo_config, postgres_config=postgres_config)
+    experiment_config = ExperimentConfig(runs_dir=Path(runs_dir)) if runs_dir else ExperimentConfig()
+    runner = ExperimentRunner(experiment_config=experiment_config, odoo_config=odoo_config, postgres_config=postgres_config)
     runner.run_experiment(
         agent_name=agent_name,
         model_name=model_name,

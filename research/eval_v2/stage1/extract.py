@@ -113,6 +113,14 @@ def call_openai_compatible(prompt: str, model: str, base_url: str | None, api_ke
 
 
 def default_output_stem(trajectory_path: Path) -> str:
+    try:
+        payload = json.loads(trajectory_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return task_id_from_path(trajectory_path)
+
+    task_id = payload.get("task_id")
+    if task_id:
+        return str(task_id)
     return task_id_from_path(trajectory_path)
 
 
