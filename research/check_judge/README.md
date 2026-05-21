@@ -76,8 +76,4 @@ LLM markdowns when present.
 - C-3 LLM output uses a different prompt/format from the other tasks (no
   `_judge_stage1` suffix); it's an outlier in the F1 numbers.
 
-## Literature
 
-See `claim-alignment-eval/` (sibling folder at repo root) for the paper review
-on deterministic claim matching — primarily AlignScore, VeriFact, VeriScore,
-RefChecker, Core. The bib is at `claim-alignment-eval/references.bib`.
