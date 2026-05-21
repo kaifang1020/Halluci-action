@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +13,34 @@ load_dotenv(PACKAGE_ROOT / ".env", override=True)
 
 PROMPTS_DIR = PACKAGE_ROOT / "prompts"
 RUNS_DIR = PACKAGE_ROOT / "experiments_v1"
+
+# --- Simulated environment clock -------------------------------------------
+# Single source of truth for "now". Both the agent context (harness/prompt)
+# and the data seeding (scripts/furnish_database.py) must read from here so
+# that the date the agent is told matches the date the data lives in.
+# Override via env to regenerate the dataset on a different reference date.
+SIMULATED_DATETIME = os.getenv("HALLUCI_SIMULATED_DATETIME", "2026-05-08T14:39:18+08:00")
+SIMULATED_TIMEZONE = os.getenv("HALLUCI_SIMULATED_TIMEZONE", "Asia/Shanghai")
+
+
+def simulated_now() -> datetime:
+    """Parse the simulated current datetime (timezone-aware if the ISO string carries an offset)."""
+    return datetime.fromisoformat(SIMULATED_DATETIME)
+
+
+def environment_context() -> dict[str, str]:
+    """Structured environment metadata recorded on every trajectory."""
+    return {"current_datetime": SIMULATED_DATETIME, "timezone": SIMULATED_TIMEZONE}
+
+
+def simulated_date_prompt_line() -> str:
+    """Human-readable date context injected at the top of the agent's system prompt."""
+    now = simulated_now()
+    return (
+        f"Current date: {now.date().isoformat()} ({now.strftime('%A')})\n"
+        f"Timezone: {SIMULATED_TIMEZONE}\n"
+        'Interpret relative dates such as "today", "this week", and "last month" against this date.'
+    )
 
 PROVIDER_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",

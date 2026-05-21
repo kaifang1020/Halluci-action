@@ -17,6 +17,7 @@ from research.config import (
     OdooConfig,
     PostgresConfig,
     build_agent_config,
+    environment_context,
 )
 from research.gateway import ToolGateway
 from research.tasks import TASKS, get_system_prompt, get_task, get_task_prompt, list_tasks
@@ -78,6 +79,7 @@ class ExperimentResult:
     knowledge_level: str
     steps: list[StepRecord]
     har_preliminary: dict[str, Any]
+    environment: dict[str, Any] = field(default_factory=dict)
 
 
 class ExperimentRunner:
@@ -237,6 +239,12 @@ class ExperimentRunner:
             knowledge_level=knowledge_level.upper(),
             steps=steps,
             har_preliminary=build_har_preliminary(steps),
+            environment={
+                # Default: the simulated clock is shown to the agent (it is injected
+                # into the system prompt) AND available to the judge/annotator.
+                "visible_context": environment_context(),
+                "audit_context": environment_context(),
+            },
         )
         output_path = self._save_result(result)
         click.echo(f"Saved run to {output_path}")
@@ -353,6 +361,7 @@ def split_audit_payload(
     audit_filename: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     source_payload = json.loads(json.dumps(result_payload, default=str))
+    environment = source_payload.get("environment") or {}
     audit_payload: dict[str, Any] = {
         "schema_version": "audit_sidecar_v1",
         "trajectory_id": result_payload["trajectory_id"],
@@ -361,6 +370,7 @@ def split_audit_payload(
         "task_id": result_payload.get("task_id"),
         "task": result_payload["task"],
         "knowledge_level": result_payload["knowledge_level"],
+        "environment": environment.get("audit_context", {}),
         "source_trajectory": trajectory_filename,
         "records": [],
     }
@@ -374,6 +384,7 @@ def split_audit_payload(
         "model": source_payload["model"],
         "knowledge_level": source_payload["knowledge_level"],
         "visibility_condition": "hidden_audit",
+        "environment": environment.get("visible_context", {}),
         "audit_file": audit_filename,
         "steps": source_payload.get("steps", []),
     }
