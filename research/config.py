@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -13,34 +14,6 @@ load_dotenv(PACKAGE_ROOT / ".env", override=True)
 
 PROMPTS_DIR = PACKAGE_ROOT / "prompts"
 RUNS_DIR = PACKAGE_ROOT / "experiments_v1"
-
-# --- Simulated environment clock -------------------------------------------
-# Single source of truth for "now". Both the agent context (harness/prompt)
-# and the data seeding (scripts/furnish_database.py) must read from here so
-# that the date the agent is told matches the date the data lives in.
-# Override via env to regenerate the dataset on a different reference date.
-SIMULATED_DATETIME = os.getenv("HALLUCI_SIMULATED_DATETIME", "2026-05-08T14:39:18+08:00")
-SIMULATED_TIMEZONE = os.getenv("HALLUCI_SIMULATED_TIMEZONE", "Asia/Shanghai")
-
-
-def simulated_now() -> datetime:
-    """Parse the simulated current datetime (timezone-aware if the ISO string carries an offset)."""
-    return datetime.fromisoformat(SIMULATED_DATETIME)
-
-
-def environment_context() -> dict[str, str]:
-    """Structured environment metadata recorded on every trajectory."""
-    return {"current_datetime": SIMULATED_DATETIME, "timezone": SIMULATED_TIMEZONE}
-
-
-def simulated_date_prompt_line() -> str:
-    """Human-readable date context injected at the top of the agent's system prompt."""
-    now = simulated_now()
-    return (
-        f"Current date: {now.date().isoformat()} ({now.strftime('%A')})\n"
-        f"Timezone: {SIMULATED_TIMEZONE}\n"
-        'Interpret relative dates such as "today", "this week", and "last month" against this date.'
-    )
 
 PROVIDER_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
@@ -62,6 +35,48 @@ PROVIDER_BASE_URLS = {
     "kimi": "https://api.moonshot.cn/v1",
 }
 
+BENCHMARK_CURRENT_DATE = os.getenv("BENCHMARK_CURRENT_DATE", "2026-05-08")
+BENCHMARK_CURRENT_TIME = os.getenv("BENCHMARK_CURRENT_TIME", "09:00:00")
+BENCHMARK_CURRENT_DATETIME = os.getenv("BENCHMARK_CURRENT_DATETIME", "")
+BENCHMARK_TIMEZONE = os.getenv("BENCHMARK_TIMEZONE", "Asia/Shanghai")
+
+
+def _env_first(*names: str, default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def benchmark_timezone() -> ZoneInfo:
+    return ZoneInfo(BENCHMARK_TIMEZONE)
+
+
+def benchmark_now() -> datetime:
+    tz = benchmark_timezone()
+    if BENCHMARK_CURRENT_DATETIME:
+        parsed = datetime.fromisoformat(BENCHMARK_CURRENT_DATETIME)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=tz)
+        return parsed.astimezone(tz)
+    current_date = date.fromisoformat(BENCHMARK_CURRENT_DATE)
+    current_time = time.fromisoformat(BENCHMARK_CURRENT_TIME)
+    return datetime.combine(current_date, current_time, tzinfo=tz)
+
+
+def benchmark_today() -> date:
+    return benchmark_now().date()
+
+
+def benchmark_context_text() -> str:
+    current = benchmark_now()
+    return (
+        f"Current benchmark datetime: {current.isoformat()} ({BENCHMARK_TIMEZONE}).\n"
+        "Use this as today's date/time for all relative-date instructions such as "
+        "today, yesterday, last month, next Monday, and overdue."
+    )
+
 
 @dataclass(slots=True)
 class AgentConfig:
@@ -78,7 +93,7 @@ class AgentConfig:
 @dataclass(slots=True)
 class OdooConfig:
     url: str = os.getenv("ODOO_URL", "http://localhost:8069")
-    db: str = os.getenv("ODOO_DB", "odoo_research")
+    db: str = _env_first("ODOO_DB", "ODOO_DB_NAME", default="odoo_research")
     username: str = os.getenv("ODOO_USER", "admin")
     password: str = os.getenv("ODOO_PASSWORD", "admin")
 
@@ -87,7 +102,7 @@ class OdooConfig:
 class PostgresConfig:
     host: str = os.getenv("PGHOST", "localhost")
     port: int = int(os.getenv("PGPORT", "5432"))
-    dbname: str = os.getenv("PGDATABASE", "odoo_research")
+    dbname: str = _env_first("PGDATABASE", "ODOO_DB", "ODOO_DB_NAME", default="odoo_research")
     user: str = os.getenv("PGUSER", "odoo")
     password: str = os.getenv("PGPASSWORD", "odoo_pw")
 

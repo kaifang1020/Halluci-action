@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-DB_NAME="${ODOO_DB_NAME:-odoo_research}"
+DB_NAME="${ODOO_DB_NAME:-${ODOO_DB:-odoo_research}}"
 MODULES="${ODOO_INIT_MODULES:-base,account,sale_management,crm,stock,purchase,mrp,project,hr_holidays,hr_attendance,point_of_sale}"
 
 echo "==> Starting PostgreSQL"

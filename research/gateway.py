@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,12 +10,15 @@ from typing import Any
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import Json, RealDictCursor
-import structlog
+try:
+    import structlog
+except ModuleNotFoundError:  # pragma: no cover - local runner convenience
+    structlog = None
 
 from research.config import OdooConfig, PostgresConfig
 from research.tools.odoo_tools import OdooToolExecutor
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__) if structlog else logging.getLogger(__name__)
 
 TOOL_TABLE_MAP: dict[str, list[str]] = {
     "search_sale_orders": ["sale_order", "sale_order_line"],

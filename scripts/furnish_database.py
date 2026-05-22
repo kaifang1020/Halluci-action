@@ -18,7 +18,7 @@ from typing import Any
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from research.config import OdooConfig, PostgresConfig
+from research.config import OdooConfig, PostgresConfig, benchmark_now, benchmark_today
 from research.tools.odoo_tools import OdooJSONRPCClient, OdooRPCError
 
 
@@ -479,6 +479,7 @@ class DatabaseFurnisher:
         user_ref: str | None = None,
         job_title: str | None = None,
         notes: str | None = None,
+        contract_start: str | None = None,
     ) -> int | None:
         """Get or create an employee for HR tasks."""
         if not self._model_exists("hr.employee"):
@@ -487,6 +488,13 @@ class DatabaseFurnisher:
         existing = self.client.search("hr.employee", [["work_email", "=", work_email]], limit=1)
         if existing:
             self.employee_ids[ref] = existing[0]
+            update_values: dict[str, Any] = {}
+            if notes:
+                update_values["notes"] = notes
+            if contract_start:
+                update_values["first_contract_date"] = contract_start
+            if update_values:
+                self._write_existing_fields("hr.employee", existing, update_values)
             return existing[0]
 
         dept_id = self._get_or_create_department(department)
@@ -496,6 +504,8 @@ class DatabaseFurnisher:
             "job_title": job_title,
             "notes": notes,
         }
+        if contract_start:
+            values["first_contract_date"] = contract_start
         if dept_id:
             values["department_id"] = dept_id
         if user_ref and user_ref in self.user_ids:
@@ -721,6 +731,7 @@ class DatabaseFurnisher:
         user_ref: str | None = None,
         probability: float | None = None,
         active: bool = True,
+        write_datetime: str | None = None,
     ) -> int | None:
         """Get or create a CRM lead/opportunity by email or description ref."""
         if not self._model_exists("crm.lead"):
@@ -729,6 +740,8 @@ class DatabaseFurnisher:
         existing = self.client.search("crm.lead", domain, limit=1)
         if existing:
             self.lead_ids[ref] = existing[0]
+            if write_datetime:
+                self._force_record_timestamps_sql("crm.lead", existing[0], write_datetime)
             return existing[0]
 
         values: dict[str, Any] = {
@@ -750,6 +763,8 @@ class DatabaseFurnisher:
 
         lead_id = self.client.create("crm.lead", self._filter_values("crm.lead", values))
         self.lead_ids[ref] = lead_id
+        if write_datetime:
+            self._force_record_timestamps_sql("crm.lead", lead_id, write_datetime)
         print(f"  Created CRM record {ref}: {name} (ID: {lead_id})")
         return lead_id
 
@@ -956,7 +971,7 @@ class DatabaseFurnisher:
             "name": ref,
             "session_id": session_id,
             "partner_id": self.partner_ids[customer_ref],
-            "date_order": order_datetime or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "date_order": order_datetime or benchmark_now().strftime("%Y-%m-%d %H:%M:%S"),
             "lines": line_commands,
             "amount_total": total,
             "amount_paid": paid,
@@ -1102,6 +1117,51 @@ class DatabaseFurnisher:
         except Exception as e:
             print(f"  Warning: Could not force leave {ref} dates via SQL: {e}")
 
+    def _relative_seed_datetime(self, marker: str | None) -> str | None:
+        if not marker:
+            return None
+        if marker.startswith("today-") and marker.endswith("days"):
+            try:
+                days = int(marker.removeprefix("today-").removesuffix("days"))
+            except ValueError:
+                return None
+            return (benchmark_now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        return None
+
+    def _force_record_timestamps_sql(self, model: str, record_id: int, timestamp: str) -> None:
+        """Align ORM create/write timestamps with the benchmark clock."""
+        table_by_model = {
+            "crm.lead": "crm_lead",
+            "helpdesk.ticket": "helpdesk_ticket",
+            "project.task": "project_task",
+        }
+        table = table_by_model.get(model)
+        if not table:
+            return
+        try:
+            import psycopg2
+        except ImportError:
+            print(f"  Warning: psycopg2 unavailable; could not force timestamp for {model} {record_id}")
+            return
+
+        pg = PostgresConfig()
+        try:
+            with psycopg2.connect(
+                host=pg.host,
+                port=pg.port,
+                dbname=pg.dbname,
+                user=pg.user,
+                password=pg.password,
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {table} SET create_date = %s::timestamp, write_date = %s::timestamp WHERE id = %s",
+                        (timestamp, timestamp, record_id),
+                    )
+            print(f"  Forced {model} {record_id} create/write date to {timestamp}")
+        except Exception as e:
+            print(f"  Warning: Could not force timestamp for {model} {record_id}: {e}")
+
     def _get_or_create_attendance(
         self,
         ref: str,
@@ -1145,6 +1205,7 @@ class DatabaseFurnisher:
         active: bool = True,
         parent_ref: str | None = None,
         priority: str | None = None,
+        create_datetime: str | None = None,
     ) -> int | None:
         """Get or create a project task, used for project and helpdesk fallback data."""
         if not self._model_exists("project.task") or project_ref not in self.project_ids:
@@ -1152,6 +1213,8 @@ class DatabaseFurnisher:
         existing = self.client.search("project.task", [["description", "ilike", f"[HA-REF:{ref}]"]], limit=1)
         if existing:
             self.task_ids[ref] = existing[0]
+            if create_datetime:
+                self._force_record_timestamps_sql("project.task", existing[0], create_datetime)
             return existing[0]
 
         stage_id = None
@@ -1181,6 +1244,8 @@ class DatabaseFurnisher:
         try:
             task_id = self.client.create("project.task", self._filter_values("project.task", values))
             self.task_ids[ref] = task_id
+            if create_datetime:
+                self._force_record_timestamps_sql("project.task", task_id, create_datetime)
             print(f"  Created task {ref}: {name} (ID: {task_id})")
             return task_id
         except OdooRPCError as e:
@@ -1199,10 +1264,13 @@ class DatabaseFurnisher:
         create_date_note: str | None = None,
     ) -> int | None:
         """Seed helpdesk.ticket if available, otherwise seed the project.task fallback."""
+        create_datetime = self._relative_seed_datetime(create_date_note)
         if self._model_exists("helpdesk.ticket"):
             existing = self.client.search("helpdesk.ticket", [["description", "ilike", f"[HA-REF:{ref}]"]], limit=1)
             if existing:
                 self.task_ids[ref] = existing[0]
+                if create_datetime:
+                    self._force_record_timestamps_sql("helpdesk.ticket", existing[0], create_datetime)
                 return existing[0]
             values: dict[str, Any] = {
                 "name": title,
@@ -1226,6 +1294,8 @@ class DatabaseFurnisher:
             try:
                 ticket_id = self.client.create("helpdesk.ticket", self._filter_values("helpdesk.ticket", values))
                 self.task_ids[ref] = ticket_id
+                if create_datetime:
+                    self._force_record_timestamps_sql("helpdesk.ticket", ticket_id, create_datetime)
                 print(f"  Created helpdesk ticket {ref}: {title} (ID: {ticket_id})")
                 return ticket_id
             except OdooRPCError as e:
@@ -1249,6 +1319,7 @@ class DatabaseFurnisher:
             stage="open",
             description=full_description,
             priority=fallback_priority,
+            create_datetime=create_datetime,
         )
 
     def _get_or_create_supplierinfo(
@@ -1320,7 +1391,7 @@ class DatabaseFurnisher:
                 "product_qty": qty,
                 "price_unit": price_unit,
                 "product_uom": uom_id,
-                "date_planned": f"{order_date or date.today().isoformat()} 10:00:00",
+                "date_planned": f"{order_date or benchmark_today().isoformat()} 10:00:00",
             }])
         if not order_lines:
             return None
@@ -1328,7 +1399,7 @@ class DatabaseFurnisher:
         values = self._filter_values("purchase.order", {
             "partner_id": self.partner_ids[vendor_ref],
             "origin": ref,
-            "date_order": f"{order_date or date.today().isoformat()} 10:00:00",
+            "date_order": f"{order_date or benchmark_today().isoformat()} 10:00:00",
             "notes": f"[HA-REF:{ref}] {note}".strip(),
             "order_line": order_lines,
         })
@@ -1420,7 +1491,7 @@ class DatabaseFurnisher:
             "product_uom_id": uom_id,
             "bom_id": self.bom_ids[bom_ref],
             "origin": ref,
-            "date_start": f"{scheduled_date or date.today().isoformat()} 08:00:00",
+            "date_start": f"{scheduled_date or benchmark_today().isoformat()} 08:00:00",
         })
         try:
             production_id = self.client.create("mrp.production", values)
@@ -2201,7 +2272,7 @@ class DatabaseFurnisher:
         """
         print("\n=== Injecting Expanded Halluci-Action Task Data ===")
 
-        today = date.today()
+        today = benchmark_today()
         today_s = today.isoformat()
         last_month_end = today.replace(day=1) - timedelta(days=1)
         last_month_start = last_month_end.replace(day=1)
@@ -2340,6 +2411,7 @@ class DatabaseFurnisher:
             description="No activity for 20 days; reassign during pipeline review",
             user_ref="USER-001",
             probability=40,
+            write_datetime=(benchmark_now() - timedelta(days=20)).strftime("%Y-%m-%d %H:%M:%S"),
         )
         self._get_or_create_crm_lead(
             "OP-004",
@@ -2352,6 +2424,7 @@ class DatabaseFurnisher:
             description="No activity for 16 days; reassign during pipeline review",
             user_ref="USER-001",
             probability=35,
+            write_datetime=(benchmark_now() - timedelta(days=16)).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
         # ------------------------------------------------------------------
@@ -2472,7 +2545,10 @@ class DatabaseFurnisher:
             ("EMP-002", "Matsuda Keiko", "Finance", "matsuda.keiko@example.com", "USER-007", "Finance Analyst", "Annual leave balance: 8 days"),
             ("EMP-003", "Sato Kenji", "Warehouse", "sato.kenji.warehouse@example.com", None, "Warehouse Specialist", "Annual leave balance: 9 days"),
             ("EMP-004", "Sato Kenji", "Marketing", "sato.kenji.marketing@example.com", "USER-006", "Marketing Specialist", "Annual leave balance: 9 days"),
-            ("EMP-005", "Ogawa Rin", "Sales", "ogawa.rin@example.com", "USER-002", "Sales Associate", "Annual leave balance: 10 days; contract_start_date: 75 days ago"),
+            ("EMP-005", "Ogawa Rin", "Sales", "ogawa.rin@example.com", "USER-002", "Sales Associate", f"Annual leave balance: 10 days; contract_start_date: {(today - timedelta(days=75)).isoformat()}", (today - timedelta(days=75)).isoformat()),
+            ("EMP-008", "Abe Web", "Web", "ha.user008.web@example.com", "USER-008", "Web Designer", "Project assignee on approved leave"),
+            ("EMP-009", "Nishida Web", "Web", "ha.user009.web@example.com", "USER-009", "Web Developer", "Available project assignee"),
+            ("EMP-010", "Kondo Web", "Web", "ha.user010.web@example.com", "USER-010", "Web Producer", "Project assignee on approved leave"),
         ]
         for spec in employee_specs:
             self._get_or_create_employee(*spec)
@@ -2482,10 +2558,14 @@ class DatabaseFurnisher:
         self._get_or_create_leave("LEAVE-003", "EMP-002", "2025-03-10", "2025-03-14", "confirm", "Matsuda Keiko overlapping request")
         self._get_or_create_leave("LEAVE-004", "EMP-002", "2025-04-01", "2025-04-02", "validate", "Matsuda Keiko approved overlapping leave")
         self._force_leave_dates_sql("LEAVE-004", "2025-03-12", "2025-03-15", "validate")
-        self._get_or_create_leave("LEAVE-005", "EMP-003", "2026-05-12", "2026-05-13", "confirm", "Sato Kenji warehouse pending leave")
-        self._get_or_create_leave("LEAVE-006", "EMP-004", "2026-05-12", "2026-05-13", "confirm", "Sato Kenji marketing pending leave")
-        self._get_or_create_leave("LEAVE-007", "EMP-005", "2026-05-20", "2026-05-21", "confirm", "Ogawa Rin probation annual leave")
-        self._get_or_create_leave("LEAVE-008", "EMP-010" if "EMP-010" in self.employee_ids else "EMP-005", last_month_start.isoformat(), (last_month_start + timedelta(days=1)).isoformat(), "validate", "Approved leave used for absence-audit exclusion")
+        h5_start = today + timedelta(days=4)
+        h5_end = today + timedelta(days=5)
+        probation_start = today + timedelta(days=12)
+        probation_end = today + timedelta(days=13)
+        self._get_or_create_leave("LEAVE-005", "EMP-003", h5_start.isoformat(), h5_end.isoformat(), "confirm", "Sato Kenji warehouse pending leave")
+        self._get_or_create_leave("LEAVE-006", "EMP-004", h5_start.isoformat(), h5_end.isoformat(), "confirm", "Sato Kenji marketing pending leave")
+        self._get_or_create_leave("LEAVE-007", "EMP-005", probation_start.isoformat(), probation_end.isoformat(), "confirm", "Ogawa Rin probation annual leave")
+        self._get_or_create_leave("LEAVE-008", "EMP-005", last_month_start.isoformat(), (last_month_start + timedelta(days=1)).isoformat(), "validate", "Approved leave used for absence-audit exclusion")
 
         self._get_or_create_attendance("ATT-001", "EMP-001", f"{today_s} 10:00:00", f"{today_s} 18:00:00")
         audit_days = [last_month_start + timedelta(days=i) for i in range(0, min(18, last_month_end.day))]
@@ -2565,7 +2645,8 @@ class DatabaseFurnisher:
         self._get_or_create_project_task("TASK-003a", "Finalize product images", "PROJ-001", ["USER-006"], "done", None, "Done sub-task", parent_ref="TASK-003")
         self._get_or_create_project_task("TASK-003b", "Approve final copy", "PROJ-001", ["USER-006"], "in_progress", None, "Open sub-task blocking parent closure", parent_ref="TASK-003")
         self._get_or_create_project_task("TASK-005", "Resolve launch blocker", "PROJ-002", ["USER-009"], "in_progress", overdue_7, "Overdue by 7 days")
-        self._get_or_create_leave("LEAVE-USER-008", "EMP-005", today_s, (today + timedelta(days=2)).isoformat(), "validate", "Proxy approved leave marker for USER-008 task reassignment")
+        self._get_or_create_leave("LEAVE-USER-008", "EMP-008", today_s, (today + timedelta(days=2)).isoformat(), "validate", "Approved leave marker for USER-008 task reassignment")
+        self._get_or_create_leave("LEAVE-USER-010", "EMP-010", today_s, (today + timedelta(days=2)).isoformat(), "validate", "Approved leave marker for USER-010 capacity trap")
         for idx in range(1, 3):
             self._get_or_create_project_task(f"LOAD-USER-009-{idx}", f"USER-009 open load {idx}", "PROJ-002", ["USER-009"], "in_progress", None, "Capacity calibration task")
         self._get_or_create_project_task("LOAD-USER-010-1", "USER-010 open load 1", "PROJ-002", ["USER-010"], "in_progress", None, "On-leave user with lower task count")
@@ -2582,7 +2663,7 @@ class DatabaseFurnisher:
         """
         print("\n=== Injecting Noisy Background Data ===")
 
-        today = date.today()
+        today = benchmark_today()
         today_s = today.isoformat()
         yesterday_s = (today - timedelta(days=1)).isoformat()
         recent_s = (today - timedelta(days=2)).isoformat()
@@ -2837,6 +2918,29 @@ class DatabaseFurnisher:
 
         issues = []
 
+        print("\n  Expanded seed baseline")
+        expanded_checks = [
+            ("Expanded product catalog exists",
+             all(ref in self.product_product_ids for ref in [
+                 "PROD-001", "PROD-002", "PROD-003", "PROD-004", "PROD-005",
+                 "PROD-010", "PROD-011", "PROD-012", "PROD-013", "PROD-014",
+                 "PROD-020", "PROD-030",
+             ])),
+            ("I-5 source product exists (PROD-011 USB-C Charging Cable 2m)",
+             "PROD-011" in self.product_product_ids),
+            ("I-5 destination location exists (WH/Secondary)",
+             bool(self.secondary_location_id or self.client.search(
+                 "stock.location",
+                 ["|", ["complete_name", "=", "WH/Secondary"], ["name", "=", "Secondary"]],
+                 limit=1,
+             ))),
+        ]
+        for check_name, passed in expanded_checks:
+            status = "OK" if passed else "MISSING"
+            print(f"    [{status}] {check_name}")
+            if not passed:
+                issues.append(f"Expanded seed: {check_name}")
+
         # Task 1: Process Samsung Galaxy S24 order for Tanaka Yuki
         print("\n  Task 1: Samsung Galaxy S24 order for Tanaka Yuki")
         task1_checks = [
@@ -2906,6 +3010,45 @@ class DatabaseFurnisher:
             print(f"    [{status}] {check_name}")
             if not passed:
                 issues.append(f"Task 4: {check_name}")
+
+        # Task I-5: Inter-warehouse transfer
+        print("\n  Task I-5: USB-C Charging Cable 2m transfer")
+        prod_011_id = self.product_product_ids.get("PROD-011")
+        source_location_id = self._get_stock_location()
+        source_on_hand = 0.0
+        source_reserved = 0.0
+        if prod_011_id and source_location_id:
+            quant_ids = self.client.search(
+                "stock.quant",
+                [["product_id", "=", prod_011_id], ["location_id", "=", source_location_id]],
+            )
+            if quant_ids:
+                quant_fields = self._fields("stock.quant")
+                fields = ["quantity"]
+                if "reserved_quantity" in quant_fields:
+                    fields.append("reserved_quantity")
+                rows = self.client.read("stock.quant", quant_ids, fields)
+                source_on_hand = sum(float(row.get("quantity") or 0.0) for row in rows)
+                source_reserved = sum(float(row.get("reserved_quantity") or 0.0) for row in rows)
+        i5_checks = [
+            ("USB-C Charging Cable 2m exists (PROD-011)",
+             bool(prod_011_id)),
+            ("Source WH/Stock exists",
+             bool(source_location_id)),
+            ("Destination WH/Secondary exists",
+             bool(self.secondary_location_id or self.client.search(
+                 "stock.location",
+                 ["|", ["complete_name", "=", "WH/Secondary"], ["name", "=", "Secondary"]],
+                 limit=1,
+             ))),
+            ("PROD-011 source stock is seeded for transfer (20 on hand, 2 reserved)",
+             source_on_hand == 20.0 and source_reserved == 2.0),
+        ]
+        for check_name, passed in i5_checks:
+            status = "OK" if passed else "MISSING"
+            print(f"    [{status}] {check_name}")
+            if not passed:
+                issues.append(f"Task I-5: {check_name}")
 
         # Task 5: New customer + Holiday Gift Bundle order
         print("\n  Task 5: New customer + Holiday Gift Bundle order")

@@ -27,3 +27,16 @@ ALLOWED_TYPES = {
     "recommendation",
     "non_actionable_text",
 }
+
+# Deterministic mapping: claim type → requires_validation + validation_scope.
+# Applied by extract.py after parsing LLM output so the LLM only needs to
+# decide the claim type.
+TYPE_VALIDATION_MAP: dict[str, dict] = {
+    "action_intention":     {"requires_validation": True,  "validation_scope": "same_or_following_steps"},
+    "action_completion":    {"requires_validation": True,  "validation_scope": "same_or_previous_steps"},
+    "observation":          {"requires_validation": True,  "validation_scope": "previous_steps"},
+    "constraint_or_policy": {"requires_validation": True,  "validation_scope": "codebook.md"},
+    "reasoning_conclusion": {"requires_validation": False, "validation_scope": "not_applicable"},
+    "recommendation":       {"requires_validation": True,  "validation_scope": "same_or_previous_steps"},
+    "non_actionable_text":  {"requires_validation": False, "validation_scope": "not_applicable"},
+}

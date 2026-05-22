@@ -40,8 +40,8 @@ def validate(payload: dict[str, Any]) -> list[str]:
                 errors.append(f"{loc}.claim must be a non-empty string")
             if claim.get("type") not in ALLOWED_TYPES:
                 errors.append(f"{loc}.type must be one of {sorted(ALLOWED_TYPES)}")
-            if not isinstance(claim.get("requires_validation"), bool):
-                errors.append(f"{loc}.requires_validation must be boolean")
+            # requires_validation and validation_scope are added by apply_type_mapping,
+            # not by the LLM, so they are not validated here.
     return errors
 
 

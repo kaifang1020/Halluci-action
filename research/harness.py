@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -9,20 +10,23 @@ from pathlib import Path
 from typing import Any
 
 import click
-import structlog
+try:
+    import structlog
+except ModuleNotFoundError:  # pragma: no cover - local runner convenience
+    structlog = None
 
-from research.agents import AnthropicAgent, DeepSeekAgent, GeminiAgent, KimiAgent, OpenAIAgent, QwenAgent
 from research.config import (
+    BENCHMARK_TIMEZONE,
     ExperimentConfig,
     OdooConfig,
     PostgresConfig,
+    benchmark_now,
     build_agent_config,
-    environment_context,
 )
 from research.gateway import ToolGateway
 from research.tasks import TASKS, get_system_prompt, get_task, get_task_prompt, list_tasks
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__) if structlog else logging.getLogger(__name__)
 
 PRE_CLAIM_PATTERNS = [
     re.compile(r"\b(i will|i'll|i am going to|i need to|i should|i won't|i cannot|i can't)\b", re.IGNORECASE),
@@ -77,9 +81,10 @@ class ExperimentResult:
     task: str
     task_id: str | None
     knowledge_level: str
+    visible_context: dict[str, Any]
+    audit_context: dict[str, Any]
     steps: list[StepRecord]
     har_preliminary: dict[str, Any]
-    environment: dict[str, Any] = field(default_factory=dict)
 
 
 class ExperimentRunner:
@@ -237,14 +242,16 @@ class ExperimentRunner:
             task=task_prompt,
             task_id=task_id,
             knowledge_level=knowledge_level.upper(),
+            visible_context={
+                "current_datetime": benchmark_now().isoformat(),
+                "timezone": BENCHMARK_TIMEZONE,
+            },
+            audit_context={
+                "current_datetime": benchmark_now().isoformat(),
+                "timezone": BENCHMARK_TIMEZONE,
+            },
             steps=steps,
             har_preliminary=build_har_preliminary(steps),
-            environment={
-                # Default: the simulated clock is shown to the agent (it is injected
-                # into the system prompt) AND available to the judge/annotator.
-                "visible_context": environment_context(),
-                "audit_context": environment_context(),
-            },
         )
         output_path = self._save_result(result)
         click.echo(f"Saved run to {output_path}")
@@ -253,17 +260,29 @@ class ExperimentRunner:
     def _create_agent(self, config) -> Any:
         provider = config.provider.lower()
         if provider == "anthropic" or provider == "claude":
+            from research.agents.claude_agent import AnthropicAgent
+
             config.provider = "anthropic"
             return AnthropicAgent(config)
         if provider == "openai":
+            from research.agents.openai_agent import OpenAIAgent
+
             return OpenAIAgent(config)
         if provider == "deepseek":
+            from research.agents.deepseek_agent import DeepSeekAgent
+
             return DeepSeekAgent(config)
         if provider == "gemini":
+            from research.agents.gemini_agent import GeminiAgent
+
             return GeminiAgent(config)
         if provider == "qwen":
+            from research.agents.qwen_agent import QwenAgent
+
             return QwenAgent(config)
         if provider == "kimi":
+            from research.agents.kimi_agent import KimiAgent
+
             return KimiAgent(config)
         raise ValueError(f"Unsupported agent provider: {config.provider}")
 
@@ -361,7 +380,6 @@ def split_audit_payload(
     audit_filename: str,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     source_payload = json.loads(json.dumps(result_payload, default=str))
-    environment = source_payload.get("environment") or {}
     audit_payload: dict[str, Any] = {
         "schema_version": "audit_sidecar_v1",
         "trajectory_id": result_payload["trajectory_id"],
@@ -370,7 +388,7 @@ def split_audit_payload(
         "task_id": result_payload.get("task_id"),
         "task": result_payload["task"],
         "knowledge_level": result_payload["knowledge_level"],
-        "environment": environment.get("audit_context", {}),
+        "audit_context": source_payload.get("audit_context", {}),
         "source_trajectory": trajectory_filename,
         "records": [],
     }
@@ -383,8 +401,8 @@ def split_audit_payload(
         "agent": source_payload["agent"],
         "model": source_payload["model"],
         "knowledge_level": source_payload["knowledge_level"],
+        "visible_context": source_payload.get("visible_context", {}),
         "visibility_condition": "hidden_audit",
-        "environment": environment.get("visible_context", {}),
         "audit_file": audit_filename,
         "steps": source_payload.get("steps", []),
     }

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from urllib import error, request
 
-import structlog
+try:
+    import structlog
+except ModuleNotFoundError:  # pragma: no cover - local runner convenience
+    structlog = None
 
 from research.config import OdooConfig
+from research.config import benchmark_today
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__) if structlog else logging.getLogger(__name__)
 
 
 class OdooRPCError(RuntimeError):
@@ -841,10 +846,22 @@ class OdooToolExecutor:
 
     def get_employee_info(self, employee_id: int) -> dict[str, Any]:
         self._ensure_model("hr.employee")
+        fields = [
+            "name",
+            "work_email",
+            "work_phone",
+            "department_id",
+            "parent_id",
+            "job_title",
+            "company_id",
+            "user_id",
+            "notes",
+            "first_contract_date",
+        ]
         rows = self.client.read(
             "hr.employee",
             [employee_id],
-            ["name", "work_email", "work_phone", "department_id", "parent_id", "job_title", "company_id", "user_id"],
+            self._existing_fields("hr.employee", fields),
         )
         if not rows:
             raise OdooRPCError(f"Employee {employee_id} was not found.")
@@ -859,6 +876,8 @@ class OdooToolExecutor:
             "job_title": row.get("job_title"),
             "company": self._normalize_many2one(row.get("company_id")),
             "user": self._normalize_many2one(row.get("user_id")),
+            "notes": row.get("notes"),
+            "contract_start_date": row.get("first_contract_date"),
         }
 
     def create_ticket(
@@ -1455,7 +1474,7 @@ class OdooToolExecutor:
         if origin:
             domain.append(["invoice_origin", "ilike", origin])
         if overdue_only:
-            domain.append(["invoice_date_due", "<", datetime.now().strftime("%Y-%m-%d")])
+            domain.append(["invoice_date_due", "<", benchmark_today().isoformat()])
             domain.append(["payment_state", "!=", "paid"])
 
         invoices = self.client.search_read(
@@ -1890,7 +1909,7 @@ class OdooToolExecutor:
             domain.append(["work_email", "ilike", work_email])
         if manager_id is not None:
             domain.append(["parent_id", "=", manager_id])
-        rows = self._search_read_existing("hr.employee", domain, ["name", "work_email", "department_id", "parent_id", "user_id"], limit=limit)
+        rows = self._search_read_existing("hr.employee", domain, ["name", "work_email", "department_id", "parent_id", "user_id", "notes", "first_contract_date"], limit=limit)
         return {"count": len(rows), "employees": rows}
 
     def search_leave_requests(
@@ -2421,7 +2440,43 @@ class OdooToolExecutor:
             for user_id in user_ids:
                 counts[int(user_id)] = counts.get(int(user_id), 0) + 1
         users = self._read_existing("res.users", list(counts.keys()), ["name", "login", "email"]) if counts else []
+        leave_by_user: dict[int, bool] = {}
+        if include_leave_status and counts and self.client.model_exists("hr.employee") and self.client.model_exists("hr.leave"):
+            today_s = benchmark_today().isoformat()
+            employees = self._search_read_existing(
+                "hr.employee",
+                [["user_id", "in", list(counts.keys())]],
+                ["name", "user_id"],
+                limit=500,
+            )
+            employee_to_user = {
+                employee["id"]: self._many2one_id(employee.get("user_id"))
+                for employee in employees
+                if self._many2one_id(employee.get("user_id")) is not None
+            }
+            if employee_to_user:
+                leaves = self._search_read_existing(
+                    "hr.leave",
+                    [
+                        ["employee_id", "in", list(employee_to_user.keys())],
+                        ["state", "=", "validate"],
+                        ["request_date_from", "<=", today_s],
+                        ["request_date_to", ">=", today_s],
+                    ],
+                    ["employee_id"],
+                    limit=500,
+                )
+                for leave in leaves:
+                    employee_id = self._many2one_id(leave.get("employee_id"))
+                    user_id = employee_to_user.get(employee_id) if employee_id is not None else None
+                    if user_id is not None:
+                        leave_by_user[user_id] = True
         workload = []
         for user in users:
-            workload.append({"user_id": user["id"], "name": user.get("name"), "open_task_count": counts.get(user["id"], 0), "on_leave": None})
+            workload.append({
+                "user_id": user["id"],
+                "name": user.get("name"),
+                "open_task_count": counts.get(user["id"], 0),
+                "on_leave": leave_by_user.get(user["id"], False) if include_leave_status else None,
+            })
         return {"project_id": project_id, "include_leave_status": include_leave_status, "workload": workload}

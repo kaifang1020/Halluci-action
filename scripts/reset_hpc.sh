@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 CONDA_ENV_NAME="${CONDA_ENV_NAME:-odoo-research}"
-DB_NAME="${ODOO_DB_NAME:-odoo_research}"
+DB_NAME="${ODOO_DB_NAME:-${ODOO_DB:-odoo_research}}"
 PG_PORT="${PG_PORT:-5432}"
 DATA_ROOT="${DATA_ROOT:-/gpfsnyu/scratch/km6704/odoo-research}"
 ODOO_DATA_DIR="${ODOO_DATA_DIR:-$DATA_ROOT/filestore}"

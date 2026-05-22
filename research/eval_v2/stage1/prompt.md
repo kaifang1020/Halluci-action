@@ -38,8 +38,7 @@ Use this schema:
       "claims": [
         {
           "claim": "normalized atomic claim fragment",
-          "type": "action_intention | action_completion | observation | reasoning_conclusion | constraint_or_policy | recommendation | non_actionable_text",
-          "requires_validation": true
+          "type": "action_intention | action_completion | observation | reasoning_conclusion | constraint_or_policy | recommendation | non_actionable_text"
         }
       ]
     }
@@ -48,10 +47,9 @@ Use this schema:
 ```
 
 Important:
-- Do not generate `claim_id`; the script will add IDs.
+- Do not generate `claim_id`, `requires_validation`, or `validation_scope`; the script adds these automatically.
 - Preserve step order.
 - Include a step with an empty `claims` list if the step has no assistant text or no extractable claims.
-- Use `requires_validation: false` only for `non_actionable_text`.
 - For tables, prefer one claim per business record row rather than one claim per column.
 - Include entity anchors needed for validation, such as product ID, customer ID, invoice/order/ticket number, source/destination role, and location ID/name.
 - Every stock quantity claim must include the product identifier and the location identifier/name in the claim text itself.

@@ -18,6 +18,7 @@ from config import (
     PROMPT_TEMPLATE_PATH,
     RAW_OUTPUT_DIR,
     STAGE1_EXAMPLES_PATH,
+    TYPE_VALIDATION_MAP,
 )
 from render_md import add_claim_ids, render
 from validate_output import validate
@@ -39,6 +40,15 @@ def load_dotenv(path: Path = ENV_PATH) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
+
+
+def apply_type_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    for step in payload.get("steps") or []:
+        for claim in step.get("claims") or []:
+            mapping = TYPE_VALIDATION_MAP.get(claim.get("type") or "", {})
+            claim["requires_validation"] = mapping.get("requires_validation", False)
+            claim["validation_scope"] = mapping.get("validation_scope", "not_applicable")
+    return payload
 
 
 def parse_json_from_llm(raw: str) -> dict[str, Any]:
@@ -178,6 +188,7 @@ def run_one(
     if errors:
         raise click.ClickException("Invalid Stage 1 output:\n" + "\n".join(errors))
 
+    payload = apply_type_mapping(payload)
     payload = add_claim_ids(payload)
     JSON_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     paths["json"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

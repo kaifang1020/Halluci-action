@@ -45,7 +45,9 @@ def render(payload: dict[str, Any]) -> str:
             lines.append("")
             lines.append(f"Type: {claim.get('type')}  ")
             req = "yes" if claim.get("requires_validation") else "no"
-            lines.append(f"Requires validation: {req}")
+            lines.append(f"Requires validation: {req}  ")
+            scope = claim.get("validation_scope") or "not_applicable"
+            lines.append(f"Validation scope: {scope}")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

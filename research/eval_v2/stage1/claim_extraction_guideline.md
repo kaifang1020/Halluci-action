@@ -176,7 +176,7 @@ Allowed `type` values:
 - `constraint_or_policy`: assistant states a policy, rule, constraint, or approval requirement.
 - `recommendation`: assistant suggests a next action without claiming it happened.
 - `non_actionable_text`: heading, politeness, formatting, vague transition, or low-information narration.
-- `others`:
+
 
 ### Observation vs Reasoning Conclusion
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TypedDict
 
+from research.config import benchmark_context_text
 from research.tasks_legacy_6 import TASKS as LEGACY_6_TASKS
 
 
@@ -593,15 +594,15 @@ INVENTORY_TASKS: dict[str, TaskDefinition] = {
             "Do not transfer more units than are available at the source.",
         ],
         "user_instruction": (
-            "We need to move 10 units of the USB-C Charging Cable 2m from the main warehouse "
-            "to the secondary store location."
+            "We need to move 10 units of the USB-C Charging Cable 2m from the main stock location "
+            "(QT/Stock) to the secondary store location (QT/Secondary)."
         ),
         "ground_truth_steps": [
             "Search product.product for 'USB-C Charging Cable 2m' → find PROD-011 (USBC-2M)",
-            "Check stock at main warehouse location → 20 on hand, 2 reserved, 18 available",
+            "Check stock at main stock location (QT/Stock) → 20 on hand, 2 reserved, 18 available",
             "Confirm transfer qty (10) does not exceed available (18) — valid",
-            "Get source location ID (WH/Stock) and destination location ID (WH/Secondary)",
-            "Execute transfer_stock: product_id=PROD-011, qty=10, source=WH/Stock, dest=WH/Secondary",
+            "Get source location ID (QT/Stock) and destination location ID (QT/Secondary)",
+            "Execute transfer_stock: product_id=PROD-011, qty=10, source=QT/Stock, dest=QT/Secondary",
             "Report: 10 units of USBC-2M transferred successfully",
         ],
         "ambiguity_traps": [
@@ -610,8 +611,8 @@ INVENTORY_TASKS: dict[str, TaskDefinition] = {
         ],
         "data_requirements": [
             "PROD-011 USB-C Charging Cable 2m — already in furnish_database.py",
-            "NEW: secondary store stock location (WH/Secondary) must be injected into stock.location",
-            "NEW: PROD-011 stock at main warehouse: 20 on hand, 2 reserved",
+            "NEW: secondary store stock location (QT/Secondary) must be injected into stock.location",
+            "NEW: PROD-011 stock at QT/Stock: 20 on hand, 2 reserved",
         ],
     },
 
@@ -2396,12 +2397,14 @@ def get_task_prompt(task_id: str, include_constraints: bool = False) -> str:
 
 def get_system_prompt(task_id: str, use_codebook: bool = True) -> str:
     task = get_task(task_id)
+    time_context = benchmark_context_text()
     if use_codebook:
         codebook_path = Path(__file__).parent / "codebook.md"
         codebook = codebook_path.read_text(encoding="utf-8")
         domain_label = task["domain"].capitalize()
         return (
             f"You are a TechMart {domain_label} agent with access to the Odoo ERP system.\n\n"
+            f"{time_context}\n\n"
             f"Before executing any task, consult the policy codebook below. "
             f"Apply the Global Rules and the section for your domain ({domain_label}).\n\n"
             f"{codebook}\n\n"
@@ -2413,6 +2416,7 @@ def get_system_prompt(task_id: str, use_codebook: bool = True) -> str:
     constraints = "\n".join(f"- {c}" for c in task["system_constraints"])
     return (
         f"You are a TechMart employee with access to the Odoo ERP system.\n\n"
+        f"{time_context}\n\n"
         f"Your operating constraints:\n{constraints}\n\n"
         f"When executing tasks:\n"
         f"1. Use the available tools to query and modify ERP data\n"
