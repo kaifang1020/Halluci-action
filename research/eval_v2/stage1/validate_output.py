@@ -6,7 +6,7 @@ from typing import Any
 
 import click
 
-from config import ALLOWED_TYPES
+from config import ALLOWED_TYPES, TYPE_VALIDATION_RULES
 
 
 def validate(payload: dict[str, Any]) -> list[str]:
@@ -38,10 +38,19 @@ def validate(payload: dict[str, Any]) -> list[str]:
                 continue
             if not isinstance(claim.get("claim"), str) or not claim.get("claim", "").strip():
                 errors.append(f"{loc}.claim must be a non-empty string")
-            if claim.get("type") not in ALLOWED_TYPES:
+            claim_type = claim.get("type")
+            if claim_type not in ALLOWED_TYPES:
                 errors.append(f"{loc}.type must be one of {sorted(ALLOWED_TYPES)}")
-            # requires_validation and validation_scope are added by apply_type_mapping,
-            # not by the LLM, so they are not validated here.
+                continue
+            expected_requires, expected_scope = TYPE_VALIDATION_RULES[claim_type]
+            if claim.get("requires_validation") != expected_requires:
+                errors.append(
+                    f"{loc}.requires_validation must be {expected_requires} for type {claim_type}"
+                )
+            if claim.get("validation_scope") != expected_scope:
+                errors.append(
+                    f"{loc}.validation_scope must be {expected_scope!r} for type {claim_type}"
+                )
     return errors
 
 

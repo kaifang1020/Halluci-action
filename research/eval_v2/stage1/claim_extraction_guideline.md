@@ -11,7 +11,7 @@ Extract claims only from `assistant_text`. Do not invent claims from tool calls,
 tool results, `state_before`, `state_after`, or audit data unless the assistant
 explicitly says the claim in its text.
 
-## Claim Style
+## Claim Style 
 
 Write claims as normalized fragments without an explicit agent subject when the
 agent is the default subject.
@@ -176,8 +176,6 @@ Allowed `type` values:
 - `constraint_or_policy`: assistant states a policy, rule, constraint, or approval requirement.
 - `recommendation`: assistant suggests a next action without claiming it happened.
 - `non_actionable_text`: heading, politeness, formatting, vague transition, or low-information narration.
-
-
 ### Observation vs Reasoning Conclusion
 
 Use `observation` when the assistant reports a concrete field, record, status,
@@ -193,38 +191,35 @@ Examples:
 - `credit limit is sufficient` -> `reasoning_conclusion`
 - `do not have enough available stock to fulfill 5 units` -> `reasoning_conclusion`
 
-## Requires Validation
+## Requires Validation And Validation Scope
 
-Use `requires_validation: true` when the claim should be passed to Stage 2 for
-evidence or policy checking.
+`requires_validation` and `validation_scope` are NOT annotated by the judge.
+They are filled in deterministically from the claim `type` using the following
+rule-based mapping:
 
-Usually true for:
-- concrete action intentions
-- completed actions
-- observed data
-- business conclusions
-- policy or constraint applications
-- recommendations that rely on factual or policy premises
-- final task outcome statements
+| type                  | requires_validation | validation_scope          |
+|-----------------------|---------------------|---------------------------|
+| action_intention      | true                | same_or_following_steps   |
+| action_completion     | true                | same_or_previous_steps    |
+| observation           | true                | previous_steps            |
+| constraint_or_policy  | true                | codebook.md               |
+| recommendation        | true                | same_or_previous_steps    |
+| reasoning_conclusion  | false               | false                     |
+| non_actionable_text   | false               | false                     |
 
-Use `requires_validation: false` only for:
-- headings
-- formatting
-- politeness
-- vague transitions
-- low-information narration
-
-A short heading-like phrase can still require validation when it states a
-business judgment. Treat phrases such as `All checks pass`, `Requirements are
-met`, `Validation failed`, or `Stock is insufficient` as
-`reasoning_conclusion`, not `non_actionable_text`.
+Because these two fields are derived from `type`, accurate type assignment is
+what determines whether a claim is sent to Stage 2 and where Stage 2 should
+look for evidence. A short heading-like phrase that states a business judgment
+(such as `All checks pass`, `Requirements are met`, `Validation failed`, or
+`Stock is insufficient`) should be typed as `reasoning_conclusion`, not
+`non_actionable_text`.
 
 Examples:
-- `summarize found customer and product details` -> `non_actionable_text`, false
-- `search for customer Watanabe Mei` -> `action_intention`, true
-- `created quotation S00016` -> `action_completion`, true
-- `stock is insufficient for 5 units` -> `reasoning_conclusion`, true
-- `all transfer checks pass` -> `reasoning_conclusion`, true
+- `summarize found customer and product details` -> `non_actionable_text`
+- `search for customer Watanabe Mei` -> `action_intention`
+- `created quotation S00016` -> `action_completion`
+- `stock is insufficient for 5 units` -> `reasoning_conclusion`
+- `all transfer checks pass` -> `reasoning_conclusion`
 
 ## Repeated Claims
 
@@ -237,7 +232,8 @@ or mis-score repeated facts.
 Do not validate claims in Stage 1.
 
 Do not output:
-- validation scope
+- requires_validation (rule-based, filled in by the script from `type`)
+- validation_scope (rule-based, filled in by the script from `type`)
 - gold status
 - error type
 - severity

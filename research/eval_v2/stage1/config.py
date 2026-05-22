@@ -28,15 +28,15 @@ ALLOWED_TYPES = {
     "non_actionable_text",
 }
 
-# Deterministic mapping: claim type → requires_validation + validation_scope.
-# Applied by extract.py after parsing LLM output so the LLM only needs to
-# decide the claim type.
-TYPE_VALIDATION_MAP: dict[str, dict] = {
-    "action_intention":     {"requires_validation": True,  "validation_scope": "same_or_following_steps"},
-    "action_completion":    {"requires_validation": True,  "validation_scope": "same_or_previous_steps"},
-    "observation":          {"requires_validation": True,  "validation_scope": "previous_steps"},
-    "constraint_or_policy": {"requires_validation": True,  "validation_scope": "codebook.md"},
-    "reasoning_conclusion": {"requires_validation": False, "validation_scope": "not_applicable"},
-    "recommendation":       {"requires_validation": True,  "validation_scope": "same_or_previous_steps"},
-    "non_actionable_text":  {"requires_validation": False, "validation_scope": "not_applicable"},
+# Rule-based mapping from claim type to (requires_validation, validation_scope).
+# Stage 1 does not call an LLM to decide these fields; they are derived from `type`.
+# `validation_scope` is `False` (boolean) when no scope applies.
+TYPE_VALIDATION_RULES: dict[str, tuple[bool, str | bool]] = {
+    "action_intention": (True, "same_or_following_steps"),
+    "action_completion": (True, "same_or_previous_steps"),
+    "observation": (True, "previous_steps"),
+    "constraint_or_policy": (True, "codebook.md"),
+    "recommendation": (True, "same_or_previous_steps"),
+    "reasoning_conclusion": (False, False),
+    "non_actionable_text": (False, False),
 }

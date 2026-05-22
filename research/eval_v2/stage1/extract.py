@@ -18,7 +18,7 @@ from config import (
     PROMPT_TEMPLATE_PATH,
     RAW_OUTPUT_DIR,
     STAGE1_EXAMPLES_PATH,
-    TYPE_VALIDATION_MAP,
+    TYPE_VALIDATION_RULES,
 )
 from render_md import add_claim_ids, render
 from validate_output import validate
@@ -56,6 +56,26 @@ def parse_json_from_llm(raw: str) -> dict[str, Any]:
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     return json.loads(text)
+
+
+def apply_validation_rules(payload: dict[str, Any]) -> dict[str, Any]:
+    """Deterministically set requires_validation and validation_scope from claim type."""
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for claim in step.get("claims") or []:
+            if not isinstance(claim, dict):
+                continue
+            claim_type = claim.get("type")
+            rule = TYPE_VALIDATION_RULES.get(claim_type)
+            if rule is None:
+                claim["requires_validation"] = False
+                claim["validation_scope"] = False
+            else:
+                requires_validation, validation_scope = rule
+                claim["requires_validation"] = requires_validation
+                claim["validation_scope"] = validation_scope
+    return payload
 
 
 def task_id_from_path(path: Path) -> str:
@@ -104,22 +124,103 @@ def build_prompt(trajectory_path: Path) -> str:
     )
 
 
-def call_openai_compatible(prompt: str, model: str, base_url: str | None, api_key: str | None) -> str:
+STAGE1_SYSTEM_PROMPT = (
+    "You are a precise Stage 1 claim extraction annotator. Return valid JSON only."
+)
+
+
+def _check_finish_reason(choice: Any, model: str) -> None:
+    reason = getattr(choice, "finish_reason", None) or (
+        choice.get("finish_reason") if isinstance(choice, dict) else None
+    )
+    if reason in {"length", "max_tokens", "MAX_TOKENS"}:
+        raise click.ClickException(
+            f"Model {model} hit the output token limit (finish_reason={reason!r}). "
+            "Increase --max-tokens (or STAGE1_MAX_TOKENS) and retry."
+        )
+
+
+def call_openai_compatible(
+    prompt: str,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    max_tokens: int | None = None,
+) -> str:
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"), base_url=base_url)
-    response = client.chat.completions.create(
-        model=model,
-        temperature=0,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a precise Stage 1 claim extraction annotator. Return valid JSON only.",
-            },
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": STAGE1_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
-    )
+    }
+    if max_tokens:
+        kwargs["max_tokens"] = max_tokens
+    response = client.chat.completions.create(**kwargs)
+    _check_finish_reason(response.choices[0], model)
     return response.choices[0].message.content or ""
+
+
+def call_portkey(
+    prompt: str,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    max_tokens: int = 32768,
+) -> str:
+    """Call a Portkey AI Gateway (e.g. NYU's RT cloud gateway).
+
+    Mirrors the JS snippet:
+        const portkey = new Portkey({ baseURL, apiKey });
+        portkey.chat.completions.create({ model, messages, ... });
+
+    Routed model names like `@vertexai-hs3645/gemini-3.1-pro-preview` are
+    resolved by the gateway.
+    """
+    from portkey_ai import Portkey
+
+    client = Portkey(base_url=base_url, api_key=api_key)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": STAGE1_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        max_tokens=max_tokens,
+    )
+    _check_finish_reason(response.choices[0], model)
+    return response.choices[0].message.content or ""
+
+
+def call_provider(
+    provider: str,
+    prompt: str,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    max_tokens: int | None = None,
+) -> str:
+    if provider == "portkey":
+        return call_portkey(
+            prompt,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            max_tokens=max_tokens or 32768,
+        )
+    if provider == "openai":
+        return call_openai_compatible(
+            prompt,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            max_tokens=max_tokens,
+        )
+    raise click.ClickException(f"Unknown provider: {provider!r}. Expected 'openai' or 'portkey'.")
 
 
 def default_output_stem(trajectory_path: Path) -> str:
@@ -160,6 +261,8 @@ def run_one(
     api_key: str | None,
     dry_run: bool,
     overwrite: bool,
+    provider: str = "openai",
+    max_tokens: int | None = None,
 ) -> None:
     if should_skip(stem, dry_run=dry_run, overwrite=overwrite):
         click.echo(f"Skip existing output: {stem}")
@@ -178,12 +281,20 @@ def run_one(
     if not model:
         raise click.ClickException("Missing --model or STAGE1_MODEL.")
 
-    raw = call_openai_compatible(prompt, model=model, base_url=base_url, api_key=api_key)
+    raw = call_provider(
+        provider,
+        prompt,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        max_tokens=max_tokens,
+    )
     RAW_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     paths["raw"].write_text(raw, encoding="utf-8")
     click.echo(f"Wrote raw model output: {paths['raw']}")
 
     payload = parse_json_from_llm(raw)
+    apply_validation_rules(payload)
     errors = validate(payload)
     if errors:
         raise click.ClickException("Invalid Stage 1 output:\n" + "\n".join(errors))
@@ -223,9 +334,21 @@ def target_path_and_stem(item: dict[str, Any]) -> tuple[Path, str]:
 @click.command()
 @click.option("--trajectory", "trajectory_path", type=click.Path(exists=True, path_type=Path))
 @click.option("--target-set", type=click.Path(exists=True, path_type=Path), help="JSON list of trajectories to process.")
-@click.option("--model", default=os.environ.get("STAGE1_MODEL", ""), help="OpenAI-compatible model name.")
-@click.option("--base-url", default=os.environ.get("STAGE1_BASE_URL", None), help="OpenAI-compatible base URL.")
+@click.option(
+    "--provider",
+    type=click.Choice(["openai", "portkey"]),
+    default=os.environ.get("STAGE1_PROVIDER", "openai"),
+    help="Which client to use. 'portkey' uses the Portkey AI Gateway (e.g. NYU RT cloud).",
+)
+@click.option("--model", default=os.environ.get("STAGE1_MODEL", ""), help="Model name. For Portkey use the routed name, e.g. '@vertexai-hs3645/gemini-3.1-pro-preview'.")
+@click.option("--base-url", default=os.environ.get("STAGE1_BASE_URL", None), help="Base URL for the provider.")
 @click.option("--api-key", default=os.environ.get("STAGE1_API_KEY", None), help="API key. Defaults to environment.")
+@click.option(
+    "--max-tokens",
+    type=int,
+    default=lambda: int(os.environ.get("STAGE1_MAX_TOKENS", "0")) or None,
+    help="Max output tokens. Portkey defaults to 32768; openai unset by default.",
+)
 @click.option("--dry-run", is_flag=True, help="Only build and save the prompt; do not call the model.")
 @click.option("--output-stem", default=None, help="Output filename stem. Defaults to task ID.")
 @click.option("--overwrite", is_flag=True, help="Overwrite existing outputs.")
@@ -234,9 +357,11 @@ def target_path_and_stem(item: dict[str, Any]) -> tuple[Path, str]:
 def main(
     trajectory_path: Path | None,
     target_set: Path | None,
+    provider: str,
     model: str,
     base_url: str | None,
     api_key: str | None,
+    max_tokens: int | None,
     dry_run: bool,
     output_stem: str | None,
     overwrite: bool,
@@ -250,6 +375,14 @@ def main(
         base_url = os.environ.get("STAGE1_BASE_URL")
     if api_key is None:
         api_key = os.environ.get("STAGE1_API_KEY")
+
+    # Portkey-specific defaults: fall back to PORTKEY_* env vars so the openai
+    # path and the portkey path can coexist with distinct credentials.
+    if provider == "portkey":
+        if not base_url:
+            base_url = os.environ.get("PORTKEY_BASE_URL") or "https://ai-gateway.apps.cloud.rt.nyu.edu/v1"
+        if not api_key:
+            api_key = os.environ.get("PORTKEY_API_KEY")
 
     if bool(trajectory_path) == bool(target_set):
         raise click.ClickException("Provide exactly one of --trajectory or --target-set.")
@@ -266,6 +399,8 @@ def main(
             api_key=api_key,
             dry_run=dry_run,
             overwrite=overwrite,
+            provider=provider,
+            max_tokens=max_tokens,
         )
         return
 
@@ -287,6 +422,7 @@ def main(
                 api_key=api_key,
                 dry_run=dry_run,
                 overwrite=overwrite,
+                provider=provider,
             )
         except Exception as exc:
             failures += 1
