@@ -131,7 +131,18 @@ def reset_and_furnish(args: argparse.Namespace) -> None:
     if args.no_reset:
         print("Skipping reset/furnish because --no-reset was set.", flush=True)
         return
-    run_command(["bash", str(ROOT_DIR / "scripts" / "reset.sh")], dry_run=args.dry_run, check=True)
+
+    runtime = os.environ.get("HALLUCI_RUNTIME", "docker")
+    if runtime == "hpc":
+        reset_script = ROOT_DIR / "scripts" / "reset_hpc.sh"
+    elif runtime == "docker":
+        reset_script = ROOT_DIR / "scripts" / "reset.sh"
+    else:
+        raise SystemExit(
+            f"Unsupported HALLUCI_RUNTIME={runtime!r}; expected 'docker' or 'hpc'."
+        )
+
+    run_command(["bash", str(reset_script)], dry_run=args.dry_run, check=True)
     if args.dry_run:
         run_command([sys.executable, str(ROOT_DIR / "scripts" / "furnish_database.py")], dry_run=True)
         return
