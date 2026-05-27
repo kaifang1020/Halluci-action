@@ -666,6 +666,8 @@ class DatabaseFurnisher:
         existing = self.client.search("sale.order", domain, limit=1)
         if existing:
             self.sale_order_ids[ref] = existing[0]
+            if order_date:
+                self._write_existing_fields("sale.order", existing, {"date_order": f"{order_date} 10:00:00"})
             return existing[0]
 
         order_lines: list[list[Any]] = []
@@ -712,6 +714,9 @@ class DatabaseFurnisher:
                 self._write_existing_fields("sale.order", [so_id], {"state": "sale"})
             if state == "done":
                 self._write_existing_fields("sale.order", [so_id], {"state": "done"})
+        if order_date:
+            # Odoo may replace date_order with the real confirmation time.
+            self._write_existing_fields("sale.order", [so_id], {"date_order": f"{order_date} 10:00:00"})
 
         row = self.client.read("sale.order", [so_id], ["name", "state"])[0]
         print(f"  Created sale order {ref}: {row.get('name')} state={row.get('state')}")
@@ -738,10 +743,10 @@ class DatabaseFurnisher:
             return None
         domain: list[Any] = [["email_from", "=", email]] if email else [["description", "ilike", f"[HA-REF:{ref}]"]]
         existing = self.client.search("crm.lead", domain, limit=1)
+        aligned_write_datetime = write_datetime or benchmark_now().strftime("%Y-%m-%d %H:%M:%S")
         if existing:
             self.lead_ids[ref] = existing[0]
-            if write_datetime:
-                self._force_record_timestamps_sql("crm.lead", existing[0], write_datetime)
+            self._force_record_timestamps_sql("crm.lead", existing[0], aligned_write_datetime)
             return existing[0]
 
         values: dict[str, Any] = {
@@ -763,8 +768,7 @@ class DatabaseFurnisher:
 
         lead_id = self.client.create("crm.lead", self._filter_values("crm.lead", values))
         self.lead_ids[ref] = lead_id
-        if write_datetime:
-            self._force_record_timestamps_sql("crm.lead", lead_id, write_datetime)
+        self._force_record_timestamps_sql("crm.lead", lead_id, aligned_write_datetime)
         print(f"  Created CRM record {ref}: {name} (ID: {lead_id})")
         return lead_id
 
@@ -1162,6 +1166,34 @@ class DatabaseFurnisher:
         except Exception as e:
             print(f"  Warning: Could not force timestamp for {model} {record_id}: {e}")
 
+    def _force_message_dates_sql(self, model: str, record_id: int, timestamp: str) -> None:
+        """Align automatic chatter/message dates for seeded business records."""
+        if not self._model_exists("mail.message"):
+            return
+        try:
+            import psycopg2
+        except ImportError:
+            print(f"  Warning: psycopg2 unavailable; could not force message dates for {model} {record_id}")
+            return
+
+        pg = PostgresConfig()
+        try:
+            with psycopg2.connect(
+                host=pg.host,
+                port=pg.port,
+                dbname=pg.dbname,
+                user=pg.user,
+                password=pg.password,
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE mail_message SET date = %s::timestamp WHERE model = %s AND res_id = %s",
+                        (timestamp, model, record_id),
+                    )
+            print(f"  Forced {model} {record_id} message dates to {timestamp}")
+        except Exception as e:
+            print(f"  Warning: Could not force message dates for {model} {record_id}: {e}")
+
     def _get_or_create_attendance(
         self,
         ref: str,
@@ -1215,6 +1247,7 @@ class DatabaseFurnisher:
             self.task_ids[ref] = existing[0]
             if create_datetime:
                 self._force_record_timestamps_sql("project.task", existing[0], create_datetime)
+                self._force_message_dates_sql("project.task", existing[0], create_datetime)
             return existing[0]
 
         stage_id = None
@@ -1246,6 +1279,7 @@ class DatabaseFurnisher:
             self.task_ids[ref] = task_id
             if create_datetime:
                 self._force_record_timestamps_sql("project.task", task_id, create_datetime)
+                self._force_message_dates_sql("project.task", task_id, create_datetime)
             print(f"  Created task {ref}: {name} (ID: {task_id})")
             return task_id
         except OdooRPCError as e:
@@ -1271,6 +1305,7 @@ class DatabaseFurnisher:
                 self.task_ids[ref] = existing[0]
                 if create_datetime:
                     self._force_record_timestamps_sql("helpdesk.ticket", existing[0], create_datetime)
+                    self._force_message_dates_sql("helpdesk.ticket", existing[0], create_datetime)
                 return existing[0]
             values: dict[str, Any] = {
                 "name": title,
@@ -1296,6 +1331,7 @@ class DatabaseFurnisher:
                 self.task_ids[ref] = ticket_id
                 if create_datetime:
                     self._force_record_timestamps_sql("helpdesk.ticket", ticket_id, create_datetime)
+                    self._force_message_dates_sql("helpdesk.ticket", ticket_id, create_datetime)
                 print(f"  Created helpdesk ticket {ref}: {title} (ID: {ticket_id})")
                 return ticket_id
             except OdooRPCError as e:
@@ -1615,6 +1651,13 @@ class DatabaseFurnisher:
                 "list_price": 49.99,
                 "category": ("Chargers", "Accessories"),
             },
+            {
+                "ref": "PROD-015",
+                "name": "USB-C Fast Charge Adapter 25W",
+                "default_code": "USBC-ADP25-SALES",
+                "list_price": 29.99,
+                "category": ("Accessories", None),
+            },
             # Appliances - similar model names
             {
                 "ref": "PROD-020",
@@ -1898,6 +1941,7 @@ class DatabaseFurnisher:
             ("PROD-011", 100, 0),    # final QT value is overridden later by expanded seed
             ("PROD-012", 2, 2),      # final QT value is overridden later by expanded seed
             ("PROD-013", 50, 0),     # final QT value is overridden later by expanded seed
+            ("PROD-015", 0, 0),      # S-5 sales-only allocation SKU is set later
             ("PROD-014", 0, 0),
             ("PROD-021", 0, 0),
             ("PROD-022", 7, 0),
@@ -2019,6 +2063,7 @@ class DatabaseFurnisher:
             )
             if existing_order:
                 self.sale_order_ids[ref] = existing_order[0]
+                self._write_existing_fields("sale.order", existing_order, {"date_order": f"{order['date']} 10:00:00"})
                 so_data = self.client.read("sale.order", existing_order, ["name", "state"])
                 so_name = so_data[0].get("name", ref) if so_data else ref
                 so_state = so_data[0].get("state", "unknown") if so_data else "unknown"
@@ -2069,6 +2114,7 @@ class DatabaseFurnisher:
                     self.client.execute_kw("sale.order", "action_confirm", [[so_id]])
                 except OdooRPCError:
                     self.client.write("sale.order", [so_id], {"state": "sale"})
+            self._write_existing_fields("sale.order", [so_id], {"date_order": f"{order['date']} 10:00:00"})
 
             # Read back the order name
             so_data = self.client.read("sale.order", [so_id], ["name", "state"])
@@ -2127,6 +2173,11 @@ class DatabaseFurnisher:
 
             if existing:
                 self.lead_ids[ref] = existing[0]
+                self._force_record_timestamps_sql(
+                    "crm.lead",
+                    existing[0],
+                    benchmark_now().strftime("%Y-%m-%d %H:%M:%S"),
+                )
                 print(f"  Lead exists: {lead['name']} (ID: {existing[0]})")
                 continue
 
@@ -2143,6 +2194,11 @@ class DatabaseFurnisher:
 
             lead_id = self.client.create("crm.lead", values)
             self.lead_ids[ref] = lead_id
+            self._force_record_timestamps_sql(
+                "crm.lead",
+                lead_id,
+                benchmark_now().strftime("%Y-%m-%d %H:%M:%S"),
+            )
             print(f"  Created lead: {lead['name']} (ID: {lead_id})")
 
         print(f"  Total leads: {len(self.lead_ids)}")
@@ -2332,6 +2388,7 @@ class DatabaseFurnisher:
         self._set_stock_level("PROD-011", 20, 2)
         self._set_stock_level("PROD-012", 15, 0)
         self._set_stock_level("PROD-013", 8, 3)
+        self._set_stock_level("PROD-015", 8, 3)
         self._set_stock_level("PROD-011", 0, 0, secondary_location_id)
 
         # SO-005 is created in inject_sales_orders (CUST-005/PROD-002/draft).
@@ -2346,10 +2403,10 @@ class DatabaseFurnisher:
         self._get_or_create_sale_order(
             "SO-007",
             "CUST-006",
-            [("PROD-013", 8, None)],
+            [("PROD-015", 8, None)],
             state="draft",
             order_date=today_s,
-            note="Partial delivery scenario: 5 available, 3 reserved elsewhere",
+            note="Partial delivery scenario: 5 available, 3 reserved elsewhere; sales allocation SKU for USB-C Fast Chargers 25W",
         )
         self._get_or_create_sale_order(
             "SO-008-APPROVED",
@@ -2589,12 +2646,12 @@ class DatabaseFurnisher:
         self._get_or_create_project("TEAM-001", "Tech Support", active=True)
         self._get_or_create_project("TEAM-002", "Finance / Billing", active=True)
         self._get_or_create_support_ticket("TKT-002", "USB-C cable warranty replacement", "Cable replaced under warranty; follow-up task remains open", "CUST-003", "USER-003", "TEAM-001", "1")
-        self._get_or_create_support_ticket("TKT-003", "Invoice dispute", "Billing dispute currently assigned to tech support", "CUST-003", "USER-003", "TEAM-001", "1")
-        self._get_or_create_support_ticket("TKT-004", "Device won't power on", "No resolution note; last customer reply 3 days ago", "CUST-003", "USER-003", "TEAM-001", "2", "today-3days")
-        self._get_or_create_support_ticket("TKT-005", "Late delivery complaint", "Customer unhappy with delivery delay", "CUST-004", "USER-003", "TEAM-001", "1")
-        self._get_or_create_support_ticket("TKT-006", "Product defect - Dyson V15", "Dyson V15 defect investigation", "CUST-004", "USER-003", "TEAM-001", "2")
-        self._get_or_create_support_ticket("TKT-007", "Urgent charger failure", "Priority 3 ticket older than 3 days", "CUST-003", "USER-003", "TEAM-001", "3", "today-3days")
-        self._get_or_create_support_ticket("TKT-008", "Urgent phone activation failure", "Priority 3 ticket older than 4 days", "CUST-004", "USER-003", "TEAM-001", "3", "today-4days")
+        self._get_or_create_support_ticket("TKT-003", "Invoice dispute", "Billing dispute currently assigned to tech support", "CUST-003", "USER-003", "TEAM-001", "0")
+        self._get_or_create_support_ticket("TKT-004", "Device won't power on", "No resolution note; last customer reply 3 days ago", "CUST-003", "USER-003", "TEAM-001", "1", "today-3days")
+        self._get_or_create_support_ticket("TKT-005", "Late delivery complaint", "Customer unhappy with delivery delay", "CUST-004", "USER-003", "TEAM-001", "0")
+        self._get_or_create_support_ticket("TKT-006", "Product defect - Dyson V15", "Dyson V15 defect investigation", "CUST-004", "USER-003", "TEAM-001", "1")
+        self._get_or_create_support_ticket("TKT-007", "Urgent charger failure", "Charger stopped working; customer unable to charge device", "CUST-003", "USER-003", "TEAM-001", "1", "today-3days")
+        self._get_or_create_support_ticket("TKT-008", "Urgent phone activation failure", "Phone activation failed after purchase; customer cannot use device", "CUST-004", "USER-003", "TEAM-001", "1", "today-4days")
         for idx in range(9, 12):
             self._get_or_create_support_ticket(f"TKT-{idx:03d}", f"Support backlog item {idx}", "Open support backlog item", "CUST-003", "USER-003", "TEAM-001", "1")
         self._get_or_create_support_ticket("TKT-012", "Capacity holder ticket A", "Open ticket assigned to spare support agent", "CUST-001", "USER-005", "TEAM-001", "1")

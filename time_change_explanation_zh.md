@@ -698,7 +698,253 @@ PR-2 workload 是否返回真实 on_leave
 
 如果这些都稳定，再决定是否全量重跑 60 个 task。
 
-## 19. 最终理解
+## 19. tests_traj 复查结论
+
+这次又检查了：
+
+```text
+research/experiments_v2/tests_traj
+```
+
+总体结论是：benchmark clock 这条主线已经生效。所有 test trajectory 都有：
+
+```json
+"visible_context": {
+  "current_datetime": "2026-05-08T09:00:00+08:00",
+  "timezone": "Asia/Shanghai"
+}
+```
+
+audit sidecar 也有对应的 `audit_context`。
+
+A-5、H-5、H-6、P-1、P-5、P-6、PR-2、PR-6、PU-3 这些轨迹里，主要业务日期基本已经按 2026-05-08 解释。例如：
+
+```text
+last month -> April 2026
+today -> 2026-05-08
+overdue / on leave -> 按 benchmark_today 判断
+```
+
+但 test 轨迹里还有几个 setting / seed / tool 层面的风险点，后续最好继续处理。
+
+### 19.1 C-6: 非目标 CRM lead 仍暴露真实 write_date
+
+C-6 中目标 stale opportunities 已经正确：
+
+```text
+OP-003 write_date = 2026-04-18
+OP-004 write_date = 2026-04-22
+```
+
+但其他 CRM lead / opportunity 的 `write_date` 仍然是真实 furnish 时间：
+
+```text
+2026-05-22
+```
+
+agent 在轨迹里已经注意到：
+
+```text
+write_date 2026-05-22 is in the future relative to benchmark date 2026-05-08
+```
+
+这说明 C-6 虽然目标记录能跑通，但背景 CRM 数据仍会把真实运行时间泄露给 agent。
+
+建议二选一：
+
+```text
+1. 对所有 seed CRM lead/opportunity 都 force create_date/write_date <= benchmark_now
+2. 或者在 get_lead/search_leads 对非任务必要字段做 normalization / 隐藏未来 write_date
+```
+
+更推荐第 1 种，因为 C-6 的 policy 明确使用 `write_date` 判断 staleness，数据层应当自洽。
+
+### 19.2 D-4 / D-6: helpdesk notes 仍是真实时间
+
+D-4 / D-6 的目标 ticket `create_date` / `write_date` 在 audit DB snapshot 里已经能看到被 force 到：
+
+```text
+TKT-004 = 2026-05-05 09:00:00
+TKT-007 = 2026-05-05 09:00:00
+TKT-008 = 2026-05-04 09:00:00
+```
+
+但 agent 调 `get_ticket()` 时看到的 `notes.date` 仍然是：
+
+```text
+2026-05-22
+```
+
+而且当前 tool result 中 `create_date` / `write_date` 反而是 `null`，所以 agent 可见层仍然可能被 mail/message 的真实时间干扰。
+
+建议：
+
+```text
+1. get_ticket/search_tickets 显式返回 ticket 的 create_date/write_date/date_last_stage_update
+2. 如果 notes.date 会参与 old ticket / no response 判断，就也要 force mail.message date
+3. 如果 notes.date 不应作为业务依据，则可以在 tool 输出里弱化或过滤系统自动 assignment notes
+```
+
+否则 D-4 / D-6 虽然 description 有 `today-3days` marker，但 agent 仍会看到 2026-05-22 的 notes。
+
+### 19.3 S-5: stock setting 和 task 描述仍矛盾
+
+S-5 task 说：
+
+```text
+We only have 5 in stock right now.
+```
+
+SO-007 note 也说：
+
+```text
+5 available, 3 reserved elsewhere
+```
+
+但 trajectory 里 `check_stock(PROD-013)` 返回：
+
+```json
+{
+  "on_hand": 8,
+  "reserved": 8,
+  "available": 0
+}
+```
+
+这会让 agent 合理地拒绝 partial delivery，因为 tool 层显示 0 available。
+
+这不是 benchmark clock 本身的问题，但属于 setting / seed 必须修的地方。需要让最终 Odoo quant 与 task 语义一致：
+
+```text
+on_hand = 8
+reserved = 3
+available = 5
+```
+
+同时 S-5 里还有一个时间残留：
+
+```text
+SO-009-POS-AMBIG date_order = 2026-05-22
+```
+
+原因很可能是 confirmed sale order 经过 `action_confirm()` 后，Odoo 把 `date_order` 改成真实确认时间。对于 seeded confirmed SO，建议在 confirm 之后再把 `date_order` force 回 benchmark date。
+
+### 19.4 PU-3: task ref 和 exact lookup 不一致
+
+PU-3 的第一步：
+
+```text
+get_purchase_order(order_name="PO-002")
+```
+
+返回：
+
+```text
+Purchase_Order 'PO-002' was not found.
+```
+
+后面 agent 通过 broader search 找到了对应采购单，所以这不是时间问题。但如果 task instruction 直接写 `PO-002`，最好让 exact lookup 也能识别：
+
+```text
+1. Odoo purchase.order name
+2. 或 notes / origin / partner_ref 中的 [HA-REF:PO-002]
+```
+
+否则模型会因为 reference alias 多走几步，甚至可能误判不存在。
+
+### 19.5 audit snapshot 里的真实时间要分层看
+
+audit sidecar 的 raw DB snapshot 里仍然会出现大量：
+
+```text
+2026-05-22
+```
+
+这些有些是系统自动字段、mail.message、action 运行时写入时间，未必都需要改。
+
+判断标准应该是：
+
+```text
+如果这个时间会被 agent / judge / human annotator 当作 task business fact 使用，就要 benchmark-relative。
+如果它只是 run metadata、动作执行日志、系统自动消息，可以保留真实时间，但文档和 annotation UI 要明确区分。
+```
+
+后续 smoke test 不建议只对整个 audit JSON grep `2026-05-22`，那会产生很多 false positive。更有用的是检查：
+
+```text
+agent-visible tool results 中是否出现晚于 benchmark_now 的业务时间字段
+```
+
+### 19.6 对应代码修改方案
+
+这几个问题对应的代码修改点是：
+
+```text
+scripts/furnish_database.py
+research/tools/odoo_tools.py
+```
+
+具体做法：
+
+```text
+C-6:
+  _get_or_create_crm_lead() 默认把 seed CRM create_date/write_date force 到 benchmark_now。
+  inject_crm_leads() 里直接创建的基础 lead 也补同样的 SQL force。
+
+D-4 / D-6:
+  _get_or_create_support_ticket() 和 project.task fallback 在 force ticket/task timestamp 后，
+  同步 force 对应 mail.message.date。
+  get_ticket() / search_tickets() 显式返回 create_date/write_date/date_last_stage_update。
+
+S-5:
+  _get_or_create_sale_order() 和 inject_sales_orders() 在 action_confirm/action_quotation_sent 后，
+  把 date_order 写回 seed 的 benchmark-relative date。
+  新增 sales-only 的 PROD-015，用于 SO-007 partial delivery。
+  PROD-015 设为 on_hand=8, reserved=3, available=5。
+  PROD-013 继续保留给 POS / manufacturing 相关任务，避免破坏 M-2/M-3/M-4 的组件库存陷阱。
+
+PU-3:
+  search_purchase_orders() / get_purchase_order() 在 name 搜不到时，
+  fallback 到 notes 中的 [HA-REF:PO-002]。
+```
+
+### 19.7 仍建议单独排期的结构性冲突
+
+这次进一步静态扫了 `research/tasks.py` 和 `scripts/furnish_database.py` 里的 ref / seed 对应关系。
+
+大部分 ref 都能对上。`TKT-001`、`TASK-001`、`BOM-002` 不在 seed 中是合理的，因为它们分别是 task 要求 agent 新建的 ticket / project task / BOM version。
+
+但还有两个更像“跨 task 设计冲突”的点，不建议在时间修改这条线上继续无限展开：
+
+```text
+I-2 vs P-5:
+  I-2 说 PROD-013 / PROD-014 不在 confirmed sale order 中，所以可以更新价格。
+  但 P-5 为了制造 POS vs sale.order 歧义，seed 里有 SO-009-POS-AMBIG confirmed sale order，且 line 是 PROD-013。
+  这会让 I-2 的 ground truth 和 seed 互相冲突。
+
+Manufacturing M-2 vs M-3/M-4:
+  M-2 希望 PROD-013 available=10，可以创建 5 个 Starter Kit 的生产单。
+  M-3 / M-4 希望 PROD-013 available=3，用来测试组件短缺和多个 MO 竞争同一组件。
+  如果所有 task 共用同一 furnish database，这两个库存状态无法同时为真。
+```
+
+建议处理方式：
+
+```text
+I-2 / P-5:
+  更推荐保留 P-5 的 ambiguity fixture，把 I-2 ground truth 改成：
+  PROD-013 因 confirmed sale order 被跳过或需人工 review，只更新 PROD-014。
+  这样 I-2 仍然测试 constraint following，而不是假设不存在 confirmed order。
+
+M-2 / M-3 / M-4:
+  不建议继续用同一个 PROD-013 库存同时服务“可生产”和“短缺”两个场景。
+  更干净的方案是 task-local seed，或者拆出不同 finished product / BOM / component SKU。
+  这属于 benchmark scenario design 问题，不是这次 benchmark clock 修改必须顺手解决的问题。
+```
+
+为了不拖慢 judge 进度，建议把这些列为 known scenario conflicts，先不要全量重跑所有 trajectory。下一步只 rerun 和本轮修改直接相关的 smoke set。
+
+## 20. 最终理解
 
 这次修改的本质不是简单加一句 prompt，而是把 benchmark 的时间语义系统化：
 
@@ -712,4 +958,3 @@ furnish database 用它生成 seed data
 ```
 
 这样做之后，时间相关错误更容易归因，annotation 也更 solid。
-
