@@ -357,13 +357,23 @@ class OdooToolExecutor:
     def process_refund(self, order_id: int, amount: float, reason: str = "") -> dict[str, Any]:
         self._ensure_model("pos.order")
         order = self.get_order(order_id, include_lines=False)
-        refund_result = self.client.execute_kw("pos.order", "refund", [[order_id]], {"reason": reason})
+        original_total = float(order.get("amount_total") or 0.0)
+        if amount > abs(original_total):
+            return {
+                "status": "blocked",
+                "reason": "refund_amount_exceeds_original_total",
+                "original_order_id": order_id,
+                "requested_amount": amount,
+                "original_total": original_total,
+            }
+        refund_result = self.client.execute_kw("pos.order", "refund", [[order_id]])
         self._post_message("pos.order", order_id, f"Refund requested: {amount}. Reason: {reason or 'n/a'}")
         return {
+            "status": "refund_created",
             "original_order_id": order_id,
             "refund_result": refund_result,
             "requested_amount": amount,
-            "original_total": order.get("amount_total"),
+            "original_total": original_total,
             "reason": reason,
         }
 
@@ -889,12 +899,12 @@ class OdooToolExecutor:
         assignee_id: int | None = None,
     ) -> dict[str, Any]:
         model = self._helpdesk_model()
+        fields = self.client.fields_get(model)
         payload: dict[str, Any] = {
             "name": title,
             "description": description,
-            "priority": priority,
+            "priority": self._coerce_selection_value(fields, "priority", priority),
         }
-        fields = self.client.fields_get(model)
         if partner_id is not None and "partner_id" in fields:
             payload["partner_id"] = partner_id
         if model == "helpdesk.ticket":
@@ -960,10 +970,11 @@ class OdooToolExecutor:
         model = self._helpdesk_model()
         row = self.client.read(model, [ticket_id], ["priority"])[0]
         current_priority = row.get("priority") or "1"
-        values: dict[str, Any] = {
-            "priority": priority or str(min(int(current_priority or "1") + 1, 3)),
-        }
         fields = self.client.fields_get(model)
+        next_priority = priority or str(min(int(current_priority or "1") + 1, 3))
+        values: dict[str, Any] = {
+            "priority": self._coerce_selection_value(fields, "priority", next_priority),
+        }
         if team_id is not None:
             if model == "helpdesk.ticket" and "team_id" in fields:
                 values["team_id"] = team_id
@@ -977,14 +988,32 @@ class OdooToolExecutor:
         if "project_id" in fields:
             read_fields.append("project_id")
         updated = self.client.read(model, [ticket_id], read_fields)[0]
-        return {
+        actual_priority = updated.get("priority")
+        result: dict[str, Any] = {
             "ticket_id": ticket_id,
             "model": model,
             "name": updated.get("name"),
-            "priority": updated.get("priority"),
+            "priority": actual_priority,
             "team": self._normalize_many2one(updated.get("team_id") or updated.get("project_id")),
             "reason": reason,
         }
+        if str(actual_priority) != str(next_priority):
+            result["priority_note"] = (
+                f"Priority could not be set to {next_priority}; "
+                f"system maximum supported level is {actual_priority}. "
+                f"Priority remains unchanged."
+            )
+        return result
+
+    def _coerce_selection_value(self, fields: dict[str, Any], field_name: str, value: str) -> str:
+        selection = fields.get(field_name, {}).get("selection") or []
+        allowed = [str(option[0]) for option in selection if option]
+        if not allowed or str(value) in allowed:
+            return str(value)
+        numeric_allowed = [item for item in allowed if item.isdigit()]
+        if str(value).isdigit() and numeric_allowed:
+            return max((item for item in numeric_allowed if int(item) <= int(value)), default=min(numeric_allowed, key=int), key=int)
+        return allowed[0]
 
     def get_open_tickets(self, limit: int = 20, assignee_id: int | None = None) -> dict[str, Any]:
         model = self._helpdesk_model()
@@ -1984,12 +2013,42 @@ class OdooToolExecutor:
             stage_field = "stage_id"
             if stage_field in fields:
                 domain.append([f"{stage_field}.name", "ilike", state])
-        rows = self._search_read_existing(model, domain, ["name", "partner_id", "stage_id", "priority", "user_id", "team_id"], limit=limit)
+        rows = self._search_read_existing(
+            model,
+            domain,
+            [
+                "name",
+                "partner_id",
+                "stage_id",
+                "priority",
+                "user_id",
+                "team_id",
+                "create_date",
+                "write_date",
+                "date_last_stage_update",
+            ],
+            limit=limit,
+        )
         return {"model": model, "count": len(rows), "tickets": rows}
 
     def get_ticket(self, ticket_id: int, include_notes: bool = True) -> dict[str, Any]:
         model = self._helpdesk_model()
-        rows = self._read_existing(model, [ticket_id], ["name", "description", "partner_id", "stage_id", "priority", "user_id", "team_id"])
+        rows = self._read_existing(
+            model,
+            [ticket_id],
+            [
+                "name",
+                "description",
+                "partner_id",
+                "stage_id",
+                "priority",
+                "user_id",
+                "team_id",
+                "create_date",
+                "write_date",
+                "date_last_stage_update",
+            ],
+        )
         if not rows:
             raise OdooRPCError(f"Ticket {ticket_id} was not found in {model}.")
         result = {**rows[0], "id": ticket_id, "model": model}
@@ -2063,6 +2122,7 @@ class OdooToolExecutor:
         limit: int = 20,
     ) -> dict[str, Any]:
         self._ensure_model("purchase.order")
+        po_fields = self._fields("purchase.order")
         domain: list[Any] = []
         if order_name:
             domain.append(["name", "ilike", order_name])
@@ -2081,6 +2141,23 @@ class OdooToolExecutor:
             limit=limit,
             order="date_order desc",
         )
+        if order_name and not rows and "notes" in po_fields:
+            alt_domain: list[Any] = [["notes", "ilike", f"[HA-REF:{order_name}]"]]
+            if vendor_id is not None:
+                alt_domain.append(["partner_id", "=", vendor_id])
+            if state:
+                alt_domain.append(["state", "=", state])
+            if date_from:
+                alt_domain.append(["date_order", ">=", date_from])
+            if date_to:
+                alt_domain.append(["date_order", "<=", date_to])
+            rows = self._search_read_existing(
+                "purchase.order",
+                alt_domain,
+                ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "notes"],
+                limit=limit,
+                order="date_order desc",
+            )
         if product_id is not None:
             rows = [
                 row for row in rows
@@ -2090,7 +2167,16 @@ class OdooToolExecutor:
 
     def get_purchase_order(self, order_id: int | None = None, order_name: str | None = None) -> dict[str, Any]:
         self._ensure_model("purchase.order")
-        po_id = self._find_by_id_or_name("purchase.order", order_id, order_name, "purchase_order")
+        try:
+            po_id = self._find_by_id_or_name("purchase.order", order_id, order_name, "purchase_order")
+        except OdooRPCError:
+            po_fields = self._fields("purchase.order")
+            if not order_name or "notes" not in po_fields:
+                raise
+            ids = self.client.search("purchase.order", [["notes", "ilike", f"[HA-REF:{order_name}]"]], limit=1)
+            if not ids:
+                raise
+            po_id = ids[0]
         rows = self._read_existing("purchase.order", [po_id], ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "picking_ids", "notes"])
         if not rows:
             raise OdooRPCError(f"Purchase order {po_id} was not found.")

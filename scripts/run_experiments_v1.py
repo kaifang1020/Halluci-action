@@ -70,6 +70,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=int(os.environ.get("MAX_STEPS", "15")))
     parser.add_argument("--timeout-sec", type=int, default=300, help="Timeout per task run.")
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument(
+        "--post-reset-wait-sec",
+        type=int,
+        default=int(os.environ.get("POST_RESET_WAIT_SEC", "12")),
+        help="Seconds to wait after reset before furnishing, so the Odoo web service is ready.",
+    )
+    parser.add_argument(
+        "--experiments-dir",
+        default=str(EXPERIMENTS_DIR),
+        help="Output root for trajectories, audits, summaries, and logs.",
+    )
     parser.add_argument("--no-codebook", action="store_true", help="Pass --no-codebook to the harness.")
     parser.add_argument("--no-reset", action="store_true", help="Do not reset/furnish. Useful only for local debugging.")
     parser.add_argument("--skip-existing", action="store_true", help="Skip a task when a matching trajectory already exists in its target directory.")
@@ -349,7 +360,10 @@ def run_dependent(args: argparse.Namespace, tasks: dict[str, dict[str, Any]], su
 
 
 def main() -> None:
+    global EXPERIMENTS_DIR, SUMMARY_DIR
     args = parse_args()
+    EXPERIMENTS_DIR = Path(args.experiments_dir).expanduser().resolve()
+    SUMMARY_DIR = EXPERIMENTS_DIR / "run_summaries"
     tasks = load_tasks()
     SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
     summary_path = SUMMARY_DIR / f"{timestamp()}_{args.mode}_{args.agent}_{slug(args.model)}.jsonl"
