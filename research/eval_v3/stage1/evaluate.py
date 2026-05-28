@@ -79,6 +79,8 @@ def greedy_match(
 class ClaimResult:
     gold_span: str | None
     judge_span: str | None
+    gold_type: str | None
+    judge_type: str | None
     gold_words: int   # 0 for FP
     judge_words: int  # 0 for FN
     intersection: int
@@ -91,10 +93,20 @@ class ClaimResult:
     def recall(self) -> float:
         return self.intersection / self.gold_words if self.gold_words > 0 else 0.0
 
+    @property
+    def type_correct(self) -> bool | None:
+        """None for FP/FN (no counterpart to compare). True/False for matched pairs."""
+        if self.gold_span is None or self.judge_span is None:
+            return None
+        return self.gold_type == self.judge_type
+
     def to_dict(self) -> dict:
         return {
             "gold_span": self.gold_span,
             "judge_span": self.judge_span,
+            "gold_type": self.gold_type,
+            "judge_type": self.judge_type,
+            "type_correct": self.type_correct,
             "gold_words": self.gold_words,
             "judge_words": self.judge_words,
             "intersection": self.intersection,
@@ -130,11 +142,19 @@ class StepResult:
         d = self.total_gold_words
         return self.total_intersection / d if d > 0 else 0.0
 
+    @property
+    def type_accuracy(self) -> float | None:
+        matched = [c for c in self.claims if c.type_correct is not None]
+        if not matched:
+            return None
+        return sum(1 for c in matched if c.type_correct) / len(matched)
+
     def to_dict(self) -> dict:
         return {
             "step_id": self.step_id,
             "precision": round(self.precision, 4),
             "recall": round(self.recall, 4),
+            "type_accuracy": round(self.type_accuracy, 4) if self.type_accuracy is not None else None,
             "total_intersection": self.total_intersection,
             "total_gold_words": self.total_gold_words,
             "total_judge_words": self.total_judge_words,
@@ -174,12 +194,36 @@ class TrajResult:
         p, r = self.precision, self.recall
         return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
 
+    @property
+    def type_accuracy(self) -> float | None:
+        matched = [c for s in self.steps for c in s.claims if c.type_correct is not None]
+        if not matched:
+            return None
+        return sum(1 for c in matched if c.type_correct) / len(matched)
+
+    @property
+    def cohen_kappa(self) -> float | None:
+        matched = [c for s in self.steps for c in s.claims if c.type_correct is not None]
+        if not matched:
+            return None
+        n = len(matched)
+        gold_labels = [c.gold_type for c in matched]
+        judge_labels = [c.judge_type for c in matched]
+        p_o = sum(g == j for g, j in zip(gold_labels, judge_labels)) / n
+        gold_counts = Counter(gold_labels)
+        judge_counts = Counter(judge_labels)
+        all_types = set(gold_counts) | set(judge_counts)
+        p_e = sum((gold_counts[t] / n) * (judge_counts[t] / n) for t in all_types)
+        return (p_o - p_e) / (1 - p_e) if (1 - p_e) > 0 else 0.0
+
     def to_dict(self) -> dict:
         return {
             "traj_id": self.traj_id,
             "precision": round(self.precision, 4),
             "recall": round(self.recall, 4),
             "f1": round(self.f1, 4),
+            "type_accuracy": round(self.type_accuracy, 4) if self.type_accuracy is not None else None,
+            "cohen_kappa": round(self.cohen_kappa, 4) if self.cohen_kappa is not None else None,
             "total_intersection": self.total_intersection,
             "total_gold_words": self.total_gold_words,
             "total_judge_words": self.total_judge_words,
@@ -201,6 +245,8 @@ def evaluate_step(gold_step: GoldStep, judge_step: JudgeStep | None) -> StepResu
             ClaimResult(
                 gold_span=gold.span if gold else None,
                 judge_span=judge.span if judge else None,
+                gold_type=gold.type if gold else None,
+                judge_type=judge.type if judge else None,
                 gold_words=gold_words,
                 judge_words=judge_words,
                 intersection=intersection,

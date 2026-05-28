@@ -64,18 +64,23 @@ def main() -> None:
     parser.add_argument("--cached", action="store_true", help="Load cached judge outputs instead of calling API")
     parser.add_argument("--id", default=None, help="Run only this annotation id")
     parser.add_argument("--provider", default="deepseek", help="Judge provider: deepseek | gemini-pro | gemini-flash")
+    parser.add_argument("--prompt-version", default=None, dest="prompt_version",
+                        help="Prompt version suffix, e.g. v1 → uses system_v1.md and fewshot_v1.md")
     args = parser.parse_args()
 
     target_ids = [args.id] if args.id else list(EVAL_SET.keys())
+
+    pv = args.prompt_version
+    suffix = f"_{pv}" if pv else ""
 
     results: list[TrajResult] = []
 
     for ann_id in target_ids:
         traj_path = EVAL_SET[ann_id]
         ann_path = ANNOTATIONS_DIR / f"{ann_id}.md"
-        output_path = OUTPUTS_DIR / f"{ann_id}_{args.provider}_judge.json"
+        output_path = OUTPUTS_DIR / f"{ann_id}_{args.provider}{suffix}_judge.json"
 
-        print(f"\n[{ann_id}] provider={args.provider}")
+        print(f"\n[{ann_id}] provider={args.provider} prompt={pv or 'default'}")
 
         if args.cached:
             if not output_path.exists():
@@ -85,14 +90,15 @@ def main() -> None:
             judge_steps = load_judge_output(output_path)
         else:
             print(f"  Running judge on {traj_path.name} ...")
-            judge_steps = run_judge(traj_path, provider=args.provider, save_output=output_path)
+            judge_steps = run_judge(traj_path, provider=args.provider, save_output=output_path,
+                                    prompt_version=pv)
             print(f"  Saved judge output to {output_path}")
 
         gold = parse_gold_annotation(ann_path)
         traj_result = evaluate_traj(gold, judge_steps)
         results.append(traj_result)
 
-        eval_output = OUTPUTS_DIR / f"{ann_id}_{args.provider}_eval.json"
+        eval_output = OUTPUTS_DIR / f"{ann_id}_{args.provider}{suffix}_eval.json"
         eval_output.write_text(
             __import__("json").dumps(traj_result.to_dict(), indent=2, ensure_ascii=False)
         )

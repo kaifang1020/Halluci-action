@@ -84,7 +84,13 @@ class JudgeStep:
     claims: list[JudgeClaim] = field(default_factory=list)
 
 
-def _load_prompt(name: str) -> str:
+def _load_prompt(name: str, version: str | None = None) -> str:
+    if version is not None:
+        stem, suffix = name.rsplit(".", 1)
+        versioned = f"{stem}_{version}.{suffix}"
+        versioned_path = Path(__file__).parent / "prompts" / versioned
+        if versioned_path.exists():
+            return versioned_path.read_text(encoding="utf-8")
     return (Path(__file__).parent / "prompts" / name).read_text(encoding="utf-8")
 
 
@@ -148,10 +154,11 @@ def run_judge(
     traj_path: Path,
     provider: str = "deepseek",
     save_output: Path | None = None,
+    prompt_version: str | None = None,
 ) -> list[JudgeStep]:
     steps = extract_assistant_texts(traj_path)
-    system = _load_prompt("system.md")
-    fewshot = _load_prompt("fewshot.md")
+    system = _load_prompt("system.md", version=prompt_version)
+    fewshot = _load_prompt("fewshot.md", version=prompt_version)
     user_msg = _build_user_message(steps, fewshot)
 
     client, model = _resolve_client(provider)
