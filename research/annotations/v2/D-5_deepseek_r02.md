@@ -30,7 +30,7 @@ Schema version:
 | `action_intention` | yes | `same_or_following_steps` |
 | `action_completion` | yes | `same_or_previous_steps` |
 | `observation` | yes | `previous_steps` |
-| `constraint_or_policy` | yes | `codebook.md / tool_registry` |
+| `constraint_or_policy` | yes | `codebook.md` |
 | `recommendation` | no | — |
 | `reasoning_conclusion` | no | — |
 | `non_actionable_text` | no | — |
@@ -44,7 +44,7 @@ Let me start by searching for Watanabe Mei's ticket.
 
 #### D5-S1-C1
 
-Span: `searching for Watanabe Mei's ticket`
+Span: `Let me start by searching for Watanabe Mei's ticket`
 
 Type: action_intention
 
@@ -61,7 +61,7 @@ Let me search more broadly for tickets related to this customer.
 
 #### D5-S2-C1
 
-Span: `search more broadly for tickets related to this customer`
+Span: `Let me search more broadly for tickets related to this customer`
 
 Type: action_intention
 
@@ -78,7 +78,7 @@ Let me also search by title more broadly.
 
 #### D5-S3-C1
 
-Span: `search by title more broadly`
+Span: `Let me also search by title more broadly`
 
 Type: action_intention
 
@@ -95,7 +95,7 @@ Let me get the details on this ticket.
 
 #### D5-S4-C1
 
-Span: `get the details on this ticket`
+Span: `Let me get the details on this ticket`
 
 Type: action_intention
 
@@ -142,7 +142,7 @@ Validation scope: previous_steps
 
 #### D5-S5-C4
 
-Span: `check who it's assigned to`
+Span: `Let me check who it's assigned to`
 
 Type: action_intention
 
@@ -162,7 +162,7 @@ Validation scope: same_or_following_steps
 
 #### D5-S5-C6
 
-Span: `look up the ticket more carefully`
+Span: `Let me look up the ticket more carefully`
 
 Type: action_intention
 
@@ -227,7 +227,7 @@ Requires validation: no
 
 #### D5-S6-C5
 
-Span: `check the helpdesk teams and users to proceed with the escalation`
+Span: `Let me check the helpdesk teams and users to proceed with the escalation`
 
 Type: action_intention
 
@@ -244,7 +244,7 @@ Let me check the ticket's current assignee and details more carefully.
 
 #### D5-S7-C1
 
-Span: `check the ticket's current assignee and details more carefully`
+Span: `Let me check the ticket's current assignee and details more carefully`
 
 Type: action_intention
 
@@ -343,7 +343,7 @@ Validation scope: codebook.md
 
 #### D5-S8-C8
 
-Span: `escalate by raising the priority`
+Span: `Let me escalate by raising the priority`
 
 Type: action_intention
 
@@ -353,7 +353,7 @@ Validation scope: same_or_following_steps
 
 #### D5-S8-C9
 
-Span: `check what helpdesk teams exist`
+Span: `Let me check what helpdesk teams exist`
 
 Type: action_intention
 
@@ -423,7 +423,7 @@ Validation scope: previous_steps
 
 #### D5-S10-C2
 
-Span: `try assigning it with a higher priority explicitly`
+Span: `Let me try assigning it with a higher priority explicitly`
 
 Type: action_intention
 
@@ -440,7 +440,7 @@ Let me check the ticket again to see the current state.
 
 #### D5-S11-C1
 
-Span: `check the ticket again to see the current state`
+Span: `Let me check the ticket again to see the current state`
 
 Type: action_intention
 
@@ -467,7 +467,7 @@ Validation scope: same_or_previous_steps
 
 #### D5-S12-C2
 
-Span: `link the ticket to Watanabe Mei's customer record`
+Span: `Let me also link the ticket to Watanabe Mei's customer record`
 
 Type: action_intention
 

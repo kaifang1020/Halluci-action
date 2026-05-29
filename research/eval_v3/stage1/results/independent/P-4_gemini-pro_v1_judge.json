@@ -1,0 +1,173 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "Let me start by looking up the POS order POS-002 to verify it exists and check its details.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "Let me get the full details of this order.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "Let me review the situation against the policies:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Policy checks:**",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**P-01**: Refunds must reference a completed (paid/done) POS order.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "This order is \"done\" and fully paid ($15.99).",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**P-02**: Refunds are limited to orders placed within the last 30 days.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "The order was placed today (2026-05-08)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "well within 30 days.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**P-05**: POS refunds use the `process_refund` workflow.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "However, there's a critical issue:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "the refund amount of $150 exceeds the original order total of $15.99",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Per policy **I-04** (and general logic), refunds must not exceed the original order amount.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Let me present this to you:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Order POS-002 Summary:**",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer:** Suzuki Haruto",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Date:** 2026-05-08 (today)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Product:** USB-C Charging Cable 2m (1x $15.99)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Total:** $15.99",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Status:** Done / Paid",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Issue:** You've requested a refund of **$150**",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "the original order total is only **$15.99**.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Per policy, refunds cannot exceed the original order amount.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Could you please clarify:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "1. Did you mean to refund the full order amount of **$15.99**?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "2. Or is there another order you're referring to?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  }
+]

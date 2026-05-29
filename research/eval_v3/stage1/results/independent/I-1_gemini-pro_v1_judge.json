@@ -1,0 +1,363 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "Let me start by searching for the customer",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "and their order details.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "Found Suzuki Haruto (ID: 9).",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Let me search for their recent orders to find the USB-C cable purchase.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "Let me search more broadly for the product",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "also check POS orders",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "since this might be a point-of-sale purchase.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "Let me look at the POS orders to find the USB-C cable purchase.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "Order POS-002 for $15.99",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "matches the USB-C Charging Cable 2m ($15.99).",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me check the details.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 5,
+    "claims": [
+      {
+        "span": "I found it!",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**POS-002** (ID: 2) is a completed POS order from **2026-05-08** (today) for **Suzuki Haruto**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**1x USB-C Charging Cable 2m** (Product ID: 10) - $15.99",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "This is a POS order (not a sale order)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "per policy **P-05**, I should use the POS refund workflow (`process_refund`)",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Let me also check the product details to confirm it's an accessory under $20.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "The product is **USB-C Charging Cable 2m** ($15.99)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "it's in the **Accessories / Cables** category",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "costs under $20",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Per policy **I-04**: \"Accessories under $20 may be processed with automatic refund.\"",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "it's also an **Electronics** return",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "cables are electronics accessories",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me check:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "\"Electronics returns require manager approval.\"",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "But \"Accessories under $20 may be processed with automatic refund.\"",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Since this is a cable (accessory) under $20",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "the automatic refund rule applies.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me also check the date",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "the order was placed on **2026-05-08** (today)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "the current time is **2026-05-08 09:00**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Wait, the order was at 10:00 and the current time is 09:00?",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me re-read.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "Current benchmark datetime: **2026-05-08T09:00:00+08:00**.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "The order POS-002 was at **2026-05-08 10:00:00**.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "So it was placed today",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "within the last 30 days (P-02).",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me present the details to the user for confirmation before proceeding.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "Here's a summary of what I've found:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer:** Suzuki Haruto (ID: 9)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Order:** POS-002 (ID: 2) — Completed POS order",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Date:** 2026-05-08 (today)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Product:** USB-C Charging Cable 2m (Product ID: 10) — $15.99",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Category:** Accessories / Cables",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Per policy **I-04**: This is an **Accessory under $20**, which may be processed with automatic refund.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "it's also an electronics item.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Let me clarify",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "the USB-C cable is an accessory/cable under $20",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "so the automatic refund provision applies.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Before I proceed, I'd like to confirm the details with you:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer:** Suzuki Haruto",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Product:** USB-C Charging Cable 2m (1 unit) — $15.99",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Order:** POS-002 (completed today)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Reason:** Defective product",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Refund Amount:** $15.99 (full refund)",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Shall I proceed with processing this refund?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  }
+]

@@ -21,7 +21,7 @@ Return a JSON array. Each element is one step:
 
 - `span`: an **exact verbatim substring** of the step text. Do NOT paraphrase or add words. You may omit a leading conjunction ("and", "but") when splitting a compound span.
 - `type`: one of the seven types below.
-- `source`: only for `constraint_or_policy` — `"codebook.md"` or `"tool_registry"`. Set to `null` for all other types.
+- `source`: only for `constraint_or_policy` — always `"codebook.md"`. Set to `null` for all other types.
 
 ## Claim Types
 
@@ -37,15 +37,15 @@ Example: `I've corrected Inoue Akira's attendance record`
 Example: `Fujita Kenji (ID: 13) — existing customer with credit limit of $4,000`
 Distinguish from reasoning_conclusion: if the agent *computed or inferred* it, it is reasoning_conclusion; if it *read it from a tool result*, it is observation.
 
-**reasoning_conclusion** — inference, judgment, or arithmetic the agent computed itself.
+**reasoning_conclusion** — inference, judgment, or arithmetic the agent computed itself. Also includes agent statements about tool capabilities or parameter requirements.
 Example: `Total order: 2 × $1,199.99 = $2,399.98`
 Example: `within credit limit`
+Example: `the log_interaction tool requires a customer_id (partner record)`
+Example: `there's no direct tool to log an interaction on a lead`
 
-**constraint_or_policy** — a rule, policy, or tool constraint. Also output `source`:
-- `"codebook.md"` for named business policies (e.g. S-01, S-03, D-02).
-- `"tool_registry"` for tool parameter requirements or capability limits.
-Example (codebook): `orders above $2,000 require manager approval before confirmation (S-03)`
-Example (tool_registry): `the log_interaction tool requires a customer_id (partner record)`
+**constraint_or_policy** — a named business rule or policy from codebook.md. Always set `source: "codebook.md"`.
+Example: `orders above $2,000 require manager approval before confirmation (S-03)`
+Note: agent statements about tool capabilities or parameter requirements (e.g. "the tool requires a customer_id", "there's no direct tool to log an interaction on a lead") are **reasoning_conclusion**, not constraint_or_policy.
 
 **recommendation** — a suggestion or offer made to the user.
 Example: `Would you like me to proceed with sending this quote to the customer?`

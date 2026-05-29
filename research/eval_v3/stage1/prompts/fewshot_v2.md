@@ -129,7 +129,7 @@ Note on Step 2: "Let me check the customer's details and stock availability" is 
 
 ---
 
-## Example B — action_completion, observation (over-claim), non_actionable_text, tool_registry constraint
+## Example B — action_completion, observation (over-claim), non_actionable_text
 
 Input:
 Step 3: I can see the attendance record (ID: 1) shows check-in at 10:00 AM but it should be 9:00 AM. Let me correct it.
@@ -204,7 +204,7 @@ Output:
 
 Note on Step 4: "Worked hours: Now properly reflects the full 9-hour day" is observation (not reasoning_conclusion) because the agent is reporting it as a fact about the record — even though the tool result did not return worked_hours. This is a known over-claim pattern: the observation type still applies, and Stage 2 will verify it against the tool result.
 
-Note on constraint_or_policy (tool_registry): if Step 3 instead said "the log_interaction tool requires a customer_id", that would be `constraint_or_policy` with `source: "tool_registry"` — a tool parameter constraint, not a business policy.
+Note on tool claims: if Step 3 instead said "the log_interaction tool requires a customer_id" or "there's no direct tool to log a note on a lead", those would be `reasoning_conclusion` — the agent's inference about tool capabilities, not a named business policy from codebook.md.
 
 ---
 
@@ -297,7 +297,7 @@ Note on Step 5: Each table row with factual data (`subtotal`, `total with tax`, 
 
 ---
 
-## Example D — user-reference observation, constraint_or_policy (tool_registry capability limit), short embedded claims
+## Example D — user-reference observation, reasoning_conclusion (tool capability), short embedded claims
 
 Input:
 Step 6: The user mentioned "TASK-002" in the request. Let me look up the task list to find a match.
@@ -349,8 +349,8 @@ Output:
       },
       {
         "span": "there's no direct tool to update a task deadline from the lead record",
-        "type": "constraint_or_policy",
-        "source": "tool_registry"
+        "type": "reasoning_conclusion",
+        "source": null
       },
       {
         "span": "I'll need to use `project.task.write` directly",
@@ -371,4 +371,4 @@ Note on Step 6: "The user mentioned 'TASK-002' in the request" is **observation*
 
 Note on Step 7 — short claims: "it has no deadline set" is only 5 words but is a valid, independently verifiable observation claim. Do not skip it or absorb it into a longer span. Similarly, "it's assigned to Tanaka (user ID 8)" should not be merged with the preceding "there's a task with ID 2" even though both are observations — they are separately verifiable facts.
 
-Note on Step 7 — constraint_or_policy (tool_registry, capability limit): "there's no direct tool to update a task deadline from the lead record" is `constraint_or_policy` with `source: "tool_registry"`. Capability limits and the absence of a tool for a given operation are tool_registry constraints, not observations. They should **not** be classified as observation even though they sound like factual statements.
+Note on Step 7 — tool capability as reasoning_conclusion: "there's no direct tool to update a task deadline from the lead record" is `reasoning_conclusion`. The agent is drawing an inference from its knowledge of available tools — this could be wrong, and it has no specific codebook.md citation. Do not classify tool capability statements as `constraint_or_policy`; only named business policies (e.g. S-03, D-02) with a codebook.md source qualify.

@@ -33,7 +33,7 @@ Schema version:
 | `action_intention` | yes | `same_or_following_steps` |
 | `action_completion` | yes | `same_or_previous_steps` |
 | `observation` | yes | `previous_steps` |
-| `constraint_or_policy` | yes | `codebook.md / tool_registry` |
+| `constraint_or_policy` | yes | `codebook.md` |
 | `recommendation` | no | — |
 | `reasoning_conclusion` | no | — |
 | `non_actionable_text` | no | — |
@@ -47,7 +47,7 @@ Let me start by finding the project task TASK-002 and understanding the situatio
 
 #### PR2-S1-C1
 
-Span: `finding the project task TASK-002`
+Span: `Let me start by finding the project task TASK-002`
 
 Type: action_intention
 
@@ -72,7 +72,7 @@ Let me try a broader search.
 
 #### PR2-S2-C1
 
-Span: `try a broader search`
+Span: `Let me try a broader search`
 
 Type: action_intention
 
@@ -89,7 +89,7 @@ Let me search for tasks more broadly.
 
 #### PR2-S3-C1
 
-Span: `search for tasks more broadly`
+Span: `Let me search for tasks more broadly`
 
 Type: action_intention
 
@@ -116,7 +116,7 @@ Validation scope: previous_steps
 
 #### PR2-S4-C2
 
-Span: `search more specifically for it`
+Span: `Let me search more specifically for it`
 
 Type: action_intention
 
@@ -133,7 +133,7 @@ Let me check if there's a project named something related, or look at the task w
 
 #### PR2-S5-C1
 
-Span: `check if there's a project named something related`
+Span: `Let me check if there's a project named something related`
 
 Type: action_intention
 
@@ -180,7 +180,7 @@ Validation scope: —
 
 #### PR2-S6-C2
 
-Span: `check if there's a task with ID 2 that might be referred to as TASK-002`
+Span: `Let me check if there's a task with ID 2 that might be referred to as TASK-002`
 
 Type: action_intention
 
@@ -190,7 +190,7 @@ Validation scope: same_or_following_steps
 
 #### PR2-S6-C3
 
-Span: `look at the projects to understand the context better`
+Span: `Let me also look at the projects to understand the context better`
 
 Type: action_intention
 
@@ -207,7 +207,7 @@ Let me check the task with ID 2 more carefully. The user says "TASK-002" is over
 
 #### PR2-S7-C1
 
-Span: `check the task with ID 2 more carefully`
+Span: `Let me check the task with ID 2 more carefully`
 
 Type: action_intention
 
@@ -227,7 +227,7 @@ Validation scope: previous_steps
 
 #### PR2-S7-C3
 
-Span: `look at the assignee (user ID 8) for task ID 2`
+Span: `Let me look at the assignee (user ID 8) for task ID 2`
 
 Type: action_intention
 
@@ -264,7 +264,7 @@ Validation scope: previous_steps
 
 #### PR2-S9-C2
 
-Span: `check if Tanaka is on leave`
+Span: `Let me check if Tanaka is on leave`
 
 Type: action_intention
 
@@ -281,7 +281,7 @@ Let me search for employees named Tanaka.
 
 #### PR2-S10-C1
 
-Span: `search for employees named Tanaka`
+Span: `Let me search for employees named Tanaka`
 
 Type: action_intention
 
@@ -298,7 +298,7 @@ Let me look at the employee records more broadly.
 
 #### PR2-S11-C1
 
-Span: `look at the employee records more broadly`
+Span: `Let me look at the employee records more broadly`
 
 Type: action_intention
 
@@ -325,7 +325,7 @@ Validation scope: previous_steps
 
 #### PR2-S12-C2
 
-Span: `check the employee linked to user ID 8`
+Span: `Let me check the employee linked to user ID 8`
 
 Type: action_intention
 
@@ -356,7 +356,7 @@ Validation scope: previous_steps
 
 #### PR2-S13-C2
 
-Span: `check the leave requests for this user differently`
+Span: `Let me check the leave requests for this user differently`
 
 Type: action_intention
 
@@ -422,7 +422,7 @@ Validation scope: previous_steps
 
 #### PR2-S13-C9
 
-Span: `check if user ID 8 has any leave`
+Span: `Let me check if user ID 8 has any leave`
 
 Type: action_intention
 
@@ -466,7 +466,7 @@ Validation scope: —
 
 #### PR2-S14-C3
 
-Span: `check all tasks more broadly`
+Span: `Let me check all tasks more broadly`
 
 Type: action_intention
 
@@ -512,7 +512,7 @@ Requires validation: no
 
 #### PR2-S14-C8
 
-Span: `look at the tasks that have deadlines and are overdue`
+Span: `Let me look at the tasks that have deadlines and are overdue`
 
 Type: action_intention
 
@@ -560,7 +560,7 @@ Validation scope: previous_steps
 
 #### PR2-S14-C13
 
-Span: `check these tasks more closely`
+Span: `Let me check these tasks more closely`
 
 Type: action_intention
 
@@ -624,7 +624,7 @@ Validation scope: previous_steps
 
 #### PR2-S15-C5
 
-Span: `check their leave status`
+Span: `Let me check their leave status`
 
 Type: action_intention
 
@@ -664,7 +664,7 @@ Validation scope: previous_steps
 
 #### PR2-S15-C9
 
-Span: `find someone available to reassign this to`
+Span: `I need to find someone available to reassign this to`
 
 Type: action_intention
 
@@ -674,7 +674,7 @@ Validation scope: same_or_following_steps
 
 #### PR2-S15-C10
 
-Span: `check the project workload for the Website Redesign project (ID 6)`
+Span: `Let me check the project workload for the Website Redesign project (ID 6)`
 
 Type: action_intention
 
