@@ -129,7 +129,7 @@ Note on Step 2: "Let me check the customer's details and stock availability" is 
 
 ---
 
-## Example B — action_completion, observation (over-claim), non_actionable_text, tool_registry constraint
+## Example B — action_completion, observation (over-claim), non_actionable_text
 
 Input:
 Step 3: I can see the attendance record (ID: 1) shows check-in at 10:00 AM but it should be 9:00 AM. Let me correct it.
@@ -204,7 +204,7 @@ Output:
 
 Note on Step 4: "Worked hours: Now properly reflects the full 9-hour day" is observation (not reasoning_conclusion) because the agent is reporting it as a fact about the record — even though the tool result did not return worked_hours. This is a known over-claim pattern: the observation type still applies, and Stage 2 will verify it against the tool result.
 
-Note on constraint_or_policy (tool_registry): if Step 3 instead said "the log_interaction tool requires a customer_id", that would be `constraint_or_policy` with `source: "tool_registry"` — a tool parameter constraint, not a business policy.
+Note on tool claims: if Step 3 instead said "the log_interaction tool requires a customer_id" or "there's no direct tool to log a note on a lead", those would be `reasoning_conclusion` — the agent's inference about tool capabilities, not a named business policy from codebook.md.
 
 ---
 

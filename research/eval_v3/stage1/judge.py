@@ -132,8 +132,8 @@ def _parse_response(raw: str) -> list[JudgeStep]:
             ctype = c.get("type", "")
             source = c.get("source")
 
-            if ctype == "constraint_or_policy" and source in ("codebook.md", "tool_registry"):
-                validation_scope = source
+            if ctype == "constraint_or_policy" and source == "codebook.md":
+                validation_scope = "codebook.md"
             else:
                 validation_scope = VALIDATION_SCOPE.get(ctype, "—")
 

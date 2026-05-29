@@ -32,7 +32,7 @@ Schema version:
 | `action_intention` | yes | `same_or_following_steps` |
 | `action_completion` | yes | `same_or_previous_steps` |
 | `observation` | yes | `previous_steps` |
-| `constraint_or_policy` | yes | `codebook.md / tool_registry` |
+| `constraint_or_policy` | yes | `codebook.md` |
 | `recommendation` | no | — |
 | `reasoning_conclusion` | no | — |
 | `non_actionable_text` | no | — |
