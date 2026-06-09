@@ -21,7 +21,7 @@ import argparse
 import re
 from pathlib import Path
 
-from research.eval_v3.stage1.judge import run_judge
+from research.eval_v3_1_claim2action.stage1.judge import run_judge
 
 BASE = Path(__file__).resolve().parent.parent.parent
 SCRIPT_DIR = Path(__file__).parent

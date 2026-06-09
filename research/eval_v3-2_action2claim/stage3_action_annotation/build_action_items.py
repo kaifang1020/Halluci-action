@@ -9,6 +9,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 RESEARCH = ROOT / "research"
 OUT_DIR = Path(__file__).resolve().parent / "outputs"
+REAL_ROOT = RESEARCH / "experiments_v2" / "real"
+EXPERIMENTS_ROOT = RESEARCH / "experiments_v2"
 
 
 PILOT_TRAJECTORIES: dict[str, str] = {
@@ -78,6 +80,83 @@ def load_stage1_claims(task_id: str) -> dict[int, list[dict]]:
     for step in read_json(path):
         by_step[int(step["step_id"])] = step.get("claims") or []
     return by_step
+
+
+def infer_real_metadata(traj_path: Path) -> dict[str, str]:
+    rel = traj_path.relative_to(REAL_ROOT)
+    parts = rel.parts
+    condition = parts[0]
+    domain = parts[1]
+    chain = "single"
+    if condition == "dependent":
+        chain = parts[2]
+    return {
+        "condition": condition,
+        "domain": domain,
+        "chain": chain,
+    }
+
+
+def infer_experiment_metadata(traj_path: Path) -> dict[str, str]:
+    rel = traj_path.relative_to(EXPERIMENTS_ROOT)
+    parts = rel.parts
+    condition = parts[0]
+    domain = parts[1]
+    chain = "single"
+    if condition == "dependent":
+        chain = parts[2]
+    return {
+        "condition": condition,
+        "domain": domain,
+        "chain": chain,
+    }
+
+
+def traj_key_from_path(traj_path: Path, traj: dict, metadata: dict[str, str]) -> str:
+    task_id = traj.get("task_id") or traj_path.name.split("_", 1)[0]
+    base = f"{task_id}_deepseek"
+    if metadata["condition"] == "independent":
+        return base
+    return f"{metadata['chain']}__{base}"
+
+
+def suffix_from_filename(path: Path, task_id: str) -> str:
+    stem = path.stem
+    prefix = f"{task_id}_"
+    return stem[len(prefix):] if stem.startswith(prefix) else stem
+
+
+def traj_key_from_experiment_path(traj_path: Path, traj: dict, metadata: dict[str, str]) -> str:
+    task_id = traj.get("task_id") or traj_path.name.split("_", 1)[0]
+    suffix = suffix_from_filename(traj_path, task_id)
+    base = f"{task_id}__{suffix}"
+    if metadata["condition"] == "independent":
+        return base
+    return f"{metadata['chain']}__{base}"
+
+
+def discover_real_trajectories() -> dict[str, str]:
+    trajectories: dict[str, str] = {}
+    roots = [REAL_ROOT / "independent", REAL_ROOT / "dependent"]
+    for root in roots:
+        for traj_path in sorted(root.glob("**/trajectories/*_deepseek_chat.json")):
+            traj = read_json(traj_path)
+            metadata = infer_real_metadata(traj_path)
+            traj_key = traj_key_from_path(traj_path, traj, metadata)
+            trajectories[traj_key] = str(traj_path.relative_to(RESEARCH))
+    return trajectories
+
+
+def discover_experiment_trajectories(filename_glob: str) -> dict[str, str]:
+    trajectories: dict[str, str] = {}
+    roots = [EXPERIMENTS_ROOT / "independent", EXPERIMENTS_ROOT / "dependent"]
+    for root in roots:
+        for traj_path in sorted(root.glob(f"**/trajectories/{filename_glob}")):
+            traj = read_json(traj_path)
+            metadata = infer_experiment_metadata(traj_path)
+            traj_key = traj_key_from_experiment_path(traj_path, traj, metadata)
+            trajectories[traj_key] = str(traj_path.relative_to(RESEARCH))
+    return trajectories
 
 
 def sentence_split(text: str) -> list[str]:
@@ -169,12 +248,22 @@ def is_mutation_tool(tool_name: str) -> bool:
     return tool_name.startswith(prefixes)
 
 
-def build_items(window: int = 1, sentence_scope: str = "all") -> list[dict]:
+def build_items(
+    window: int = 1,
+    sentence_scope: str = "all",
+    trajectories: dict[str, str] | None = None,
+) -> list[dict]:
     items: list[dict] = []
     tasks = load_tasks_registry()
-    for traj_key, rel_path in PILOT_TRAJECTORIES.items():
+    for traj_key, rel_path in (trajectories or PILOT_TRAJECTORIES).items():
         traj_path = RESEARCH / rel_path
         traj = read_json(traj_path)
+        if traj_path.is_relative_to(REAL_ROOT):
+            real_metadata = infer_real_metadata(traj_path)
+        elif traj_path.is_relative_to(EXPERIMENTS_ROOT):
+            real_metadata = infer_experiment_metadata(traj_path)
+        else:
+            real_metadata = {"condition": "pilot", "domain": None, "chain": None}
         audit = load_audit(traj, traj_path)
         task_id = traj.get("task_id")
         task_def = tasks[task_id]
@@ -194,6 +283,9 @@ def build_items(window: int = 1, sentence_scope: str = "all") -> list[dict]:
                     "item_id": item_id,
                     "traj_key": traj_key,
                     "trajectory_path": str(traj_path.relative_to(ROOT)),
+                    "condition": real_metadata["condition"],
+                    "domain": real_metadata["domain"],
+                    "chain": real_metadata["chain"],
                     "traj_id": traj.get("trajectory_id"),
                     "task_id": task_id,
                     "task": traj.get("task"),
@@ -240,12 +332,21 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=OUT_DIR / "pilot_5_action_items.jsonl")
+    parser.add_argument("--source", choices=["pilot", "real", "experiments"], default="pilot")
+    parser.add_argument("--filename-glob", default="*.json",
+                        help="Used with --source experiments, e.g. '*_openai_gpt_4o.json'.")
     parser.add_argument("--window", type=int, default=1)
     parser.add_argument("--sentence-scope", choices=["all", "window"], default="all",
                         help="Use all trajectory sentences, or only +/- --window steps.")
     args = parser.parse_args()
 
-    items = build_items(window=args.window, sentence_scope=args.sentence_scope)
+    if args.source == "real":
+        trajectories = discover_real_trajectories()
+    elif args.source == "experiments":
+        trajectories = discover_experiment_trajectories(args.filename_glob)
+    else:
+        trajectories = PILOT_TRAJECTORIES
+    items = build_items(window=args.window, sentence_scope=args.sentence_scope, trajectories=trajectories)
     write_jsonl(args.out, items)
     by_traj: dict[str, int] = {}
     for item in items:
