@@ -48,9 +48,20 @@ ROUTING: dict[str, list[str]] = {
 }
 
 
-def _channels_for(claim_type: str, validation_scope: str) -> list[str]:
+# Routing version selects how much evidence action_intention claims see:
+#   v1 : tool_calls only (baseline).
+#   v2 : + tool_results (previous-steps window) for information verification,
+#        + claim_context (the agent message) to detect confirmation-deferral.
+# All other claim types are unchanged across versions.
+def _channels_for(claim_type: str, validation_scope: str,
+                  routing_version: str = "v1") -> list[str]:
     if claim_type == "constraint_or_policy" and validation_scope == "tool_registry":
         return ["tool_registry"]
+    if claim_type == "action_intention":
+        chans = ["tool_calls"]
+        if routing_version != "v1":  # v2+: add info-verification + confirmation-deferral evidence
+            chans += ["tool_results", "claim_context"]
+        return chans
     return ROUTING.get(claim_type, [])
 
 
@@ -204,20 +215,29 @@ def route_evidence(
     audit_recs: list[dict],
     codebook: str,
     tool_registry: str,
+    step_text: str = "",
+    routing_version: str = "v1",
 ) -> tuple[list[str], dict[str, Any]]:
-    channels = _channels_for(claim_type, validation_scope)
+    channels = _channels_for(claim_type, validation_scope, routing_version)
     payload: dict[str, Any] = {}
     for ch in channels:
         if ch == "tool_calls":
             payload["tool_calls"] = _window(tool_calls, claim_step, validation_scope)
         elif ch == "tool_results":
-            payload["tool_results"] = _window(tool_results, claim_step, validation_scope)
+            # action_intention re-uses results already in hand (Path B / Path C
+            # information verification), so its tool_results window is the
+            # previous steps, regardless of the claim's own validation_scope
+            # (which is same_or_following, meant for the tool_calls channel).
+            scope = "previous_steps" if claim_type == "action_intention" else validation_scope
+            payload["tool_results"] = _window(tool_results, claim_step, scope)
         elif ch == "audit":
             payload["audit"] = _window(audit_recs, claim_step, validation_scope)
         elif ch == "codebook":
             payload["codebook"] = codebook
         elif ch == "tool_registry":
             payload["tool_registry"] = tool_registry
+        elif ch == "claim_context":
+            payload["claim_context"] = step_text
     return channels, payload
 
 
@@ -228,6 +248,7 @@ def preprocess_one(
     traj_path: Path,
     *,
     codebook_path: Path = CODEBOOK_PATH,
+    routing_version: str = "v1",
 ) -> list[ClaimRecord]:
     stage1 = load_stage1(stage1_path)
     traj = load_trajectory(traj_path)
@@ -239,6 +260,9 @@ def preprocess_one(
     audit_recs = slim_audit(audit)
     codebook = load_codebook(codebook_path)
     tool_registry = load_tool_registry()
+    # step_id -> the agent message the claim was extracted from (claim_context).
+    step_text = {int(s["step_id"]): (s.get("assistant_text") or "")
+                 for s in traj.get("steps") or []}
 
     traj_id = traj.get("trajectory_id") or traj_path.stem
     records: list[ClaimRecord] = []
@@ -264,6 +288,8 @@ def preprocess_one(
                 audit_recs=audit_recs,
                 codebook=codebook,
                 tool_registry=tool_registry,
+                step_text=step_text.get(step_id, ""),
+                routing_version=routing_version,
             )
             records.append(
                 ClaimRecord(

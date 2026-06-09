@@ -36,23 +36,64 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 
-from research.eval_v3.stage2.preprocess import BASE, preprocess_one
-from research.eval_v3.stage2.render_prompt import (
+# This package lives under `eval_v3-1_claim2action/`, whose hyphen makes it an
+# invalid Python module name — so the sibling modules cannot be imported via a
+# dotted `research.eval_v3-1...` path. Run this file as a script; we put its own
+# dir on sys.path (flat sibling imports) and the repo root on sys.path (for the
+# real `research.*` packages like research.tools).
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[2]))  # parents: [0]=eval_v3-1..., [1]=research, [2]=repo root
+
+from preprocess import BASE, preprocess_one  # noqa: E402
+from render_prompt import (  # noqa: E402
     FEWSHOT_PATH, GUIDELINE_PATH, TEMPLATE_PATH, render_one,
 )
-from research.eval_v3.stage2.judge import Verdict, _resolve_client, judge_record
-
-HERE = Path(__file__).resolve().parent
+from judge import Verdict, _resolve_client, judge_record  # noqa: E402
 
 # --model value -> (judge.py provider, exact API model string).
 MODEL_REGISTRY: dict[str, tuple[str, str]] = {
     "gemini-3.1-pro-preview": ("gemini-pro", "@vertexai-hs3645/gemini-3.1-pro-preview"),
     "deepseek-v4-pro": ("deepseek", "deepseek-v4-pro"),
 }
+
+# Stage-2 prompt versions. Each loads its own prompt snapshot from
+# prompt_versions/<ver>/ and appends its suffix to --output-dir so v1 stays
+# intact as the before/after baseline.
+#   v1  baseline
+#   v2  three judge-error fixes together (see CHANGELOG.md):
+#         Cat3 observation verified against the Task Requirement header,
+#         Cat2 action_intention satisfied by already-retrieved tool_results,
+#         Cat1 action_intention deferred pending user confirmation (claim_context).
+PROMPT_VERSIONS: dict[str, dict] = {
+    "v1": {"routing": "v1", "suffix": ""},
+    "v2": {"routing": "v2", "suffix": "_v2"},
+}
+PROMPT_VERSIONS_DIR = HERE / "prompt_versions"
+
+
+def _load_prompt_files(version: str) -> tuple[str, str, str]:
+    """Return (template, guideline, fewshot) for a prompt version.
+
+    Reads the snapshot under prompt_versions/<ver>/; falls back to the live
+    files if the snapshot is missing (keeps the v1 default working)."""
+    vdir = PROMPT_VERSIONS_DIR / version
+    tmpl, guide, few = (vdir / "propmt_template.md",
+                        vdir / "action_validation_guideline.md",
+                        vdir / "stage2_examples.md")
+    if tmpl.exists() and guide.exists() and few.exists():
+        return (tmpl.read_text(encoding="utf-8"),
+                guide.read_text(encoding="utf-8"),
+                few.read_text(encoding="utf-8"))
+    return (TEMPLATE_PATH.read_text(encoding="utf-8"),
+            GUIDELINE_PATH.read_text(encoding="utf-8"),
+            FEWSHOT_PATH.read_text(encoding="utf-8"))
+
 
 _TASK_RE = re.compile(r"[A-Z]{1,3}-\d+")
 
@@ -120,7 +161,8 @@ def discover_jobs(split: str, stage1_dir: Path, ind_dir: Path, dep_dir: Path,
 
 def run_job(job: dict, *, client, model: str, template: str, guideline: str,
             fewshot: str, concurrency: int, overwrite: bool,
-            prompts_dir: Path, verdicts_dir: Path) -> dict:
+            prompts_dir: Path, verdicts_dir: Path,
+            routing_version: str = "v1") -> dict:
     split, stem = job["split"], job["stem"]
     prompt_dir = prompts_dir / split / stem
     verdict_path = verdicts_dir / split / f"{stem}_verdicts.jsonl"
@@ -128,7 +170,7 @@ def run_job(job: dict, *, client, model: str, template: str, guideline: str,
     if verdict_path.exists() and not overwrite:
         return {"stem": stem, "status": "skipped", "counts": {}}
 
-    records = preprocess_one(job["stage1"], job["traj"])
+    records = preprocess_one(job["stage1"], job["traj"], routing_version=routing_version)
     prompt_dir.mkdir(parents=True, exist_ok=True)
     verdict_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -192,19 +234,23 @@ def main() -> None:
     p.add_argument("--traj-suffix", default="_deepseek_deepseek_chat",
                    help="Filename suffix on trajectory files (excluding .json).")
     p.add_argument("--output-dir", default="binary_results",
-                   help="Output dir name under stage2/ for verdicts (prompts/ goes under it).")
+                   help="Output dir name under stage2/ for verdicts (prompts/ goes under it). "
+                        "The --prompt-version suffix is appended automatically.")
+    p.add_argument("--prompt-version", choices=list(PROMPT_VERSIONS), default="v1",
+                   help="Stage-2 prompt/routing version (default: v1 baseline). v2+ load "
+                        "prompt_versions/<ver>/ and append its suffix to --output-dir; see CHANGELOG.md.")
     args = p.parse_args()
 
+    ver = PROMPT_VERSIONS[args.prompt_version]
+    routing_version = ver["routing"]
     provider, model = MODEL_REGISTRY[args.model]
     client, _ = _resolve_client(provider)
-    template = TEMPLATE_PATH.read_text(encoding="utf-8")
-    guideline = GUIDELINE_PATH.read_text(encoding="utf-8")
-    fewshot = FEWSHOT_PATH.read_text(encoding="utf-8")
+    template, guideline, fewshot = _load_prompt_files(args.prompt_version)
 
     ind_dir = BASE / args.ind_dir
     dep_dir = BASE / args.dep_dir
     stage1_dir = BASE / args.stage1_dir
-    verdicts_dir = HERE / args.output_dir
+    verdicts_dir = HERE / (args.output_dir + ver["suffix"])
     prompts_dir = verdicts_dir / "prompts"
 
     jobs = discover_jobs(args.split, stage1_dir, ind_dir, dep_dir, args.traj_suffix)
@@ -212,6 +258,7 @@ def main() -> None:
         jobs = jobs[: args.limit]
 
     print(f"Model: {args.model}  (provider={provider}, api_model={model})")
+    print(f"Prompt:   {args.prompt_version}  (routing={routing_version})")
     print(f"Ind dir:  {ind_dir}")
     print(f"Dep dir:  {dep_dir}")
     print(f"Stage1:   {stage1_dir}")
@@ -223,7 +270,8 @@ def main() -> None:
         res = run_job(job, client=client, model=model, template=template,
                       guideline=guideline, fewshot=fewshot,
                       concurrency=args.concurrency, overwrite=args.overwrite,
-                      prompts_dir=prompts_dir, verdicts_dir=verdicts_dir)
+                      prompts_dir=prompts_dir, verdicts_dir=verdicts_dir,
+                      routing_version=routing_version)
         for k, n in res["counts"].items():
             totals[k] = totals.get(k, 0) + n
         tag = res["status"]

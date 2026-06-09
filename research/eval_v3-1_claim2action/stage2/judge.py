@@ -19,7 +19,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from research.eval_v3.stage2.render_prompt import (
+from render_prompt import (
     FEWSHOT_PATH, GUIDELINE_PATH, TEMPLATE_PATH, render_one,
 )
 
