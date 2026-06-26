@@ -31,7 +31,7 @@ PROVIDER_ALIASES = {
 PROVIDER_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
     "gemini": "https://ai-gateway.apps.cloud.rt.nyu.edu/v1",
-    "qwen": "https://dashscope.aliyuncs.com/compatible/v1",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "kimi": "https://api.moonshot.cn/v1",
 }
 

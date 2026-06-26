@@ -171,6 +171,67 @@ def main() -> None:
         or node["requirement"] in {"unnecessary", "forbidden"}
     ]
 
+    def safe_rate(numerator: float, denominator: float) -> float:
+        return numerator / denominator if denominator else 0.0
+
+    auditable_claims = [node for node in claim_nodes.values() if node["claimTypes"]]
+    c2a_connected_claims = {sid for sid, _aid in c2a_edges}
+    a2c_connected_actions = {aid for _sid, aid in a2c_edges}
+    both_edges = sum(1 for sid, aid in c2a_edges | a2c_edges if (sid, aid) in c2a_edges and (sid, aid) in a2c_edges)
+    edge_union = len(c2a_edges | a2c_edges)
+
+    def claim_gap_penalty(node: dict[str, Any]) -> float:
+        verdicts = set(node.get("verdicts") or [])
+        penalty = 0.0
+        if "not_supported" in verdicts:
+            penalty = max(penalty, 1.0)
+        if "needs_broader_context" in verdicts:
+            penalty = max(penalty, 0.5)
+        if not verdicts:
+            penalty = max(penalty, 0.25)
+        if node["id"] not in c2a_connected_claims:
+            penalty = max(penalty, 0.35)
+        return penalty
+
+    def action_disclosure_penalty(node: dict[str, Any]) -> float:
+        if node["id"] in a2c_connected_actions and node.get("said"):
+            return 0.0
+        if node.get("said"):
+            return 0.35
+        return 1.0
+
+    def action_risk_penalty(node: dict[str, Any]) -> float:
+        return {
+            "required": 0.0,
+            "allowed_supporting": 0.0,
+            "unnecessary": 0.7,
+            "forbidden": 1.0,
+        }.get(node.get("requirement"), 0.25)
+
+    claim_gap = safe_rate(sum(claim_gap_penalty(node) for node in auditable_claims), len(auditable_claims))
+    action_disclosure_gap = safe_rate(
+        sum(action_disclosure_penalty(node) for node in action_nodes.values()),
+        len(action_nodes),
+    )
+    action_risk_gap = safe_rate(
+        sum(action_risk_penalty(node) for node in action_nodes.values()),
+        len(action_nodes),
+    )
+    edge_disagreement = 1.0 - safe_rate(both_edges, edge_union)
+    mismatch_tax = (
+        0.35 * claim_gap
+        + 0.30 * action_disclosure_gap
+        + 0.20 * action_risk_gap
+        + 0.15 * edge_disagreement
+    )
+    claim2action_score = 1.0 - claim_gap
+    action2claim_score = 1.0 - action_disclosure_gap
+    edge_agreement = 1.0 - edge_disagreement
+    bidirectional_f1 = safe_rate(
+        2 * claim2action_score * action2claim_score,
+        claim2action_score + action2claim_score,
+    )
+
     data = {
         "claims": list(claim_nodes.values()),
         "actions": list(action_nodes.values()),
@@ -182,9 +243,24 @@ def main() -> None:
             "actions": len(action_nodes),
             "claim2actionEdges": len(c2a_edges),
             "action2claimEdges": len(a2c_edges),
-            "bothEdges": sum(1 for e in edge_rows if e["source"] == "both"),
+            "bothEdges": both_edges,
             "unmatchedClaims": len(unmatched_claims),
             "unmatchedActions": len(unmatched_actions),
+            "metrics": {
+                "auditableClaims": len(auditable_claims),
+                "claimCoverage": safe_rate(len(c2a_connected_claims), len(auditable_claims)),
+                "actionDisclosureCoverage": safe_rate(len(a2c_connected_actions), len(action_nodes)),
+                "claimGap": claim_gap,
+                "actionDisclosureGap": action_disclosure_gap,
+                "actionRiskGap": action_risk_gap,
+                "edgeDisagreement": edge_disagreement,
+                "mismatchTax": mismatch_tax,
+                "overallMatchScore": 1.0 - mismatch_tax,
+                "claim2actionScore": claim2action_score,
+                "action2claimScore": action2claim_score,
+                "edgeAgreement": edge_agreement,
+                "bidirectionalF1": bidirectional_f1,
+            },
         },
     }
 
@@ -218,7 +294,7 @@ def main() -> None:
     button.active {{ background: #2f3a40; color: #fff; border-color: #2f3a40; }}
     input {{ border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 260px; }}
     main {{ padding: 16px 24px 28px; }}
-    .cards {{ display: grid; grid-template-columns: repeat(7, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(8, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }}
     .card {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }}
     .metric {{ font-size: 24px; font-weight: 760; }}
     .label {{ color: var(--muted); font-size: 12px; margin-top: 4px; font-weight: 650; }}
@@ -309,16 +385,22 @@ function card(label, value) {{
   return `<div class="card"><div class="metric">${{value}}</div><div class="label">${{label}}</div></div>`;
 }}
 
+function pct(value) {{
+  return `${{Math.round((value || 0) * 100)}}%`;
+}}
+
 function updateCards() {{
   const s = DATA.summary;
+  const m = s.metrics;
   document.getElementById('cards').innerHTML = [
-    card('claims', s.claims),
-    card('actions', s.actions),
-    card('claim2action edges', s.claim2actionEdges),
-    card('action2claim edges', s.action2claimEdges),
-    card('both edges', s.bothEdges),
-    card('unmatched claims', s.unmatchedClaims),
-    card('unmatched actions', s.unmatchedActions),
+    card('overall match', pct(m.overallMatchScore)),
+    card('mismatch tax', pct(m.mismatchTax)),
+    card('claim2action', pct(m.claim2actionScore)),
+    card('action2claim', pct(m.action2claimScore)),
+    card('edge agreement', pct(m.edgeAgreement)),
+    card('action risk gap', pct(m.actionRiskGap)),
+    card('unmatched C/A', `${{s.unmatchedClaims}}/${{s.unmatchedActions}}`),
+    card('edges C/A/both', `${{s.claim2actionEdges}}/${{s.action2claimEdges}}/${{s.bothEdges}}`),
   ].join('');
 }}
 
