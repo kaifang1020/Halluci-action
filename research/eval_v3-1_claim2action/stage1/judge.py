@@ -31,6 +31,12 @@ _PROVIDER_CONFIGS: dict[str, dict[str, str]] = {
         "model_env": "GEMINI_FLASH_MODEL_STAGE1",
         "default_model": "@vertexai/gemini-2.0-flash",
     },
+    "qwen": {
+        "api_key_env": "QWEN_API_KEY",
+        "base_url_env": "QWEN_BASE_URL",
+        "model_env": "QWEN_MODEL_STAGE1",
+        "default_model": "qwen3-8b",
+    },
 }
 
 
@@ -41,6 +47,8 @@ def _resolve_client(provider: str) -> tuple[OpenAI, str]:
         raise ValueError(f"Unknown provider '{provider}'. Choices: {list(_PROVIDER_CONFIGS)}")
 
     api_key = os.environ.get(cfg["api_key_env"], "")
+    if not api_key and provider == "qwen":
+        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
         raise ValueError(f"Missing env var {cfg['api_key_env']} for provider '{provider}'")
 
@@ -150,13 +158,31 @@ def _parse_response(raw: str) -> list[JudgeStep]:
     return judge_steps
 
 
-def run_judge(
-    traj_path: Path,
-    provider: str = "deepseek",
-    save_output: Path | None = None,
-    prompt_version: str | None = None,
+def _save_judge_output(judge_steps: list[JudgeStep], save_output: Path) -> None:
+    save_output.parent.mkdir(parents=True, exist_ok=True)
+    payload = [
+        {
+            "step_id": js.step_id,
+            "claims": [
+                {
+                    "span": c.span,
+                    "type": c.type,
+                    "requires_validation": c.requires_validation,
+                    "validation_scope": c.validation_scope,
+                }
+                for c in js.claims
+            ],
+        }
+        for js in judge_steps
+    ]
+    save_output.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _run_judge_steps(
+    steps: list[tuple[int, str]],
+    provider: str,
+    prompt_version: str | None,
 ) -> list[JudgeStep]:
-    steps = extract_assistant_texts(traj_path)
     system = _load_prompt("system.md", version=prompt_version)
     fewshot = _load_prompt("fewshot.md", version=prompt_version)
     user_msg = _build_user_message(steps, fewshot)
@@ -180,26 +206,27 @@ def run_judge(
             raise ValueError("Response was truncated and content is None (gateway returned no partial content). Try increasing max_tokens or chunking the trajectory.")
     if raw is None:
         raise ValueError("Response content is None.")
-    judge_steps = _parse_response(raw)
+    return _parse_response(raw)
+
+
+def run_judge(
+    traj_path: Path,
+    provider: str = "deepseek",
+    save_output: Path | None = None,
+    prompt_version: str | None = None,
+    chunk_size_steps: int | None = None,
+) -> list[JudgeStep]:
+    steps = extract_assistant_texts(traj_path)
+    if chunk_size_steps and chunk_size_steps > 0:
+        judge_steps = []
+        for start in range(0, len(steps), chunk_size_steps):
+            chunk = steps[start:start + chunk_size_steps]
+            judge_steps.extend(_run_judge_steps(chunk, provider, prompt_version))
+    else:
+        judge_steps = _run_judge_steps(steps, provider, prompt_version)
 
     if save_output:
-        save_output.parent.mkdir(parents=True, exist_ok=True)
-        payload = [
-            {
-                "step_id": js.step_id,
-                "claims": [
-                    {
-                        "span": c.span,
-                        "type": c.type,
-                        "requires_validation": c.requires_validation,
-                        "validation_scope": c.validation_scope,
-                    }
-                    for c in js.claims
-                ],
-            }
-            for js in judge_steps
-        ]
-        save_output.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
+        _save_judge_output(judge_steps, save_output)
 
     return judge_steps
 

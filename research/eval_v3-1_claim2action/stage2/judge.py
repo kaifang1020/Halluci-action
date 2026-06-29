@@ -45,6 +45,12 @@ _PROVIDER_CONFIGS: dict[str, dict[str, str]] = {
         "model_env": "GEMINI_FLASH_MODEL_STAGE2",
         "default_model": "@vertexai-hs3645/gemini-3.1-flash-lite-preview",
     },
+    "qwen": {
+        "api_key_env": "QWEN_API_KEY",
+        "base_url_env": "QWEN_BASE_URL",
+        "model_env": "QWEN_MODEL_STAGE2",
+        "default_model": "qwen3-8b",
+    },
 }
 
 _VALID_VERDICTS = {"supported", "not_supported", "needs_broader_context"}
@@ -55,6 +61,8 @@ def _resolve_client(provider: str) -> tuple[OpenAI, str]:
     if cfg is None:
         raise ValueError(f"Unknown provider '{provider}'. Choices: {list(_PROVIDER_CONFIGS)}")
     api_key = os.environ.get(cfg["api_key_env"], "")
+    if not api_key and provider == "qwen":
+        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
         raise ValueError(f"Missing env var {cfg['api_key_env']} for provider '{provider}'")
     base_url = os.environ.get(cfg.get("base_url_env", ""), cfg.get("base_url", "")) or None

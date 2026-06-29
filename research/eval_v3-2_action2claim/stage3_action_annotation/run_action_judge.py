@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import request
@@ -36,6 +37,18 @@ MODEL_REGISTRY: dict[str, dict[str, str]] = {
         "base_url_env": "GEMINI_PRO_BASE_URL",
         "model_env": "GEMINI_PRO_MODEL_STAGE3_ACTION",
         "default_model": "@vertexai-hs3645/gemini-3.1-pro-preview",
+    },
+    "gemini-3.1-flash-preview": {
+        "api_key_env": "GEMINI_FLASH_API_KEY",
+        "base_url_env": "GEMINI_FLASH_BASE_URL",
+        "model_env": "GEMINI_FLASH_MODEL_STAGE3_ACTION",
+        "default_model": "@vertexai-hs3645/gemini-3.1-flash-lite-preview",
+    },
+    "qwen3-8b": {
+        "api_key_env": "QWEN_API_KEY",
+        "base_url_env": "QWEN_BASE_URL",
+        "model_env": "QWEN_MODEL_STAGE3_ACTION",
+        "default_model": "qwen3-8b",
     },
 }
 
@@ -88,6 +101,8 @@ def append_jsonl(path: Path, row: dict) -> None:
 def resolve_client(model_key: str) -> ChatClient:
     cfg = MODEL_REGISTRY[model_key]
     api_key = os.environ.get(cfg["api_key_env"], "")
+    if not api_key and model_key == "qwen3-8b":
+        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
         raise ValueError(f"Missing env var {cfg['api_key_env']}")
     base_url = os.environ.get(cfg["base_url_env"], "")
@@ -173,6 +188,7 @@ def main() -> None:
     parser.add_argument("--prompts-dir", type=Path, default=OUT_DIR / "judge_prompts")
     parser.add_argument("--model", choices=list(MODEL_REGISTRY), default="gemini-3.1-pro-preview")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--retry-errors", action="store_true",
                         help="Keep successful rows in --out, remove rows with error, and rerun only those items.")
@@ -200,10 +216,13 @@ def main() -> None:
     print(f"Judge model: {client.model}")
     print(f"Items: {len(items)}")
 
+    pending = [(idx, item) for idx, item in enumerate(items, 1) if item["item_id"] not in done]
     for idx, item in enumerate(items, 1):
         if item["item_id"] in done:
             print(f"[{idx}/{len(items)}] skip {item['item_id']}")
-            continue
+
+    def judge_one(index_item: tuple[int, dict]) -> tuple[int, dict]:
+        idx, item = index_item
         prompt = render_prompt(item)
         prompt_path = args.prompts_dir / f"{item['item_id']}.md"
         prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,8 +233,15 @@ def main() -> None:
             pred = normalize_prediction(item, obj, raw=None)
         except Exception as exc:  # noqa: BLE001
             pred = normalize_prediction(item, {}, raw=None, error=str(exc))
-        append_jsonl(args.out, pred)
-        print(f"[{idx}/{len(items)}] {item['item_id']}: {pred['requirement_status']} said={pred['said']} err={pred['error']}")
+        return idx, pred
+
+    with ThreadPoolExecutor(max_workers=args.concurrency) as ex:
+        futures = [ex.submit(judge_one, item) for item in pending]
+        for future in as_completed(futures):
+            idx, pred = future.result()
+            append_jsonl(args.out, pred)
+            print(f"[{idx}/{len(items)}] {pred['item_id']}: {pred['requirement_status']} "
+                  f"said={pred['said']} err={pred['error']}", flush=True)
 
     print(f"Wrote predictions -> {args.out}")
 

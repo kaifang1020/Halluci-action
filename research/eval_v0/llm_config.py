@@ -23,6 +23,7 @@ PROVIDER_PREFIXES = {
     "gemini-pro": "GEMINI_PRO",
     "gemini3.1-pro": "GEMINI_PRO",
     "gemini-flash": "GEMINI_FLASH",
+    "qwen": "QWEN",
 }
 
 

@@ -20,7 +20,7 @@ PROVIDER_ENV_VARS = {
     "openai": "OPENAI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "gemini": "GOOGLE_API_KEY",
-    "qwen": "DASHSCOPE_API_KEY",
+    "qwen": "QWEN_API_KEY",
     "kimi": "MOONSHOT_API_KEY",
 }
 
@@ -125,10 +125,13 @@ def resolve_api_key(provider: str, explicit_key: str | None = None) -> str:
         return explicit_key
     env_var = provider_env_var(provider)
     api_key = os.getenv(env_var, "")
+    if not api_key and normalize_provider(provider) == "qwen":
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
     if not api_key:
+        fallback = " or DASHSCOPE_API_KEY" if normalize_provider(provider) == "qwen" else ""
         raise ValueError(
             f"Missing API key for provider '{provider}'. "
-            f"Set {env_var} or pass --api-key."
+            f"Set {env_var}{fallback} or pass --api-key."
         )
     return api_key
 

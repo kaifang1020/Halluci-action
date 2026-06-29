@@ -19,12 +19,16 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
-from research.eval_v3_1_claim2action.stage1.judge import run_judge
 
 BASE = Path(__file__).resolve().parent.parent.parent
 SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR.parents[2]))
+
+from judge import run_judge  # noqa: E402
 
 PROVIDER = "gemini-pro"
 PROMPT_VERSION = "v1"
@@ -68,6 +72,10 @@ def _parse_args() -> argparse.Namespace:
                    help="Filename suffix to strip from each *.json to produce the task stem.")
     p.add_argument("--output-dir", default="results",
                    help="Output dir name under stage1/ (e.g. results_deepseek_reasoner).")
+    p.add_argument("--workers", type=int, default=1,
+                   help="Concurrent trajectory-level judge calls (default: 1).")
+    p.add_argument("--chunk-size-steps", type=int, default=0,
+                   help="If > 0, split each trajectory into chunks of this many assistant steps before judging.")
     return p.parse_args()
 
 
@@ -82,30 +90,40 @@ def main() -> None:
     all_entries = [("independent", e) for e in ind] + [("dependent", e) for e in dep]
 
     total = len(all_entries)
-    skipped = 0
+    skipped = sum(1 for _, (_, _, out_path) in all_entries if out_path.exists())
     print(f"Ind dir: {ind_dir}")
     print(f"Dep dir: {dep_dir}")
     print(f"Results: {results_dir}")
     print(f"Total trajectories: {total}  ({len(ind)} independent, {len(dep)} dependent)\n")
 
-    for i, (split, (label, traj_path, out_path)) in enumerate(all_entries, 1):
-        if out_path.exists():
-            print(f"[{i}/{total}] SKIP {split}/{label} (already exists)")
-            skipped += 1
-            continue
+    pending = [(i, split, entry) for i, (split, entry) in enumerate(all_entries, 1)
+               if not entry[2].exists()]
+    for i, split, (label, _, _) in [
+        (i, split, entry) for i, (split, entry) in enumerate(all_entries, 1)
+        if entry[2].exists()
+    ]:
+        print(f"[{i}/{total}] SKIP {split}/{label} (already exists)")
 
-        print(f"[{i}/{total}] {split}/{label} ...", flush=True)
+    def run_one(item: tuple[int, str, tuple[str, Path, Path]]) -> tuple[int, str, str]:
+        i, split, (label, traj_path, out_path) = item
         try:
             steps = run_judge(
                 traj_path,
                 provider=PROVIDER,
                 save_output=out_path,
                 prompt_version=PROMPT_VERSION,
+                chunk_size_steps=args.chunk_size_steps,
             )
             n_claims = sum(len(s.claims) for s in steps)
-            print(f"  -> {len(steps)} steps, {n_claims} claims -> {out_path.name}")
+            return i, split, f"{label}: {len(steps)} steps, {n_claims} claims -> {out_path.name}"
         except Exception as e:
-            print(f"  ERROR: {e}")
+            return i, split, f"{label}: ERROR: {e}"
+
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        futures = [ex.submit(run_one, item) for item in pending]
+        for future in as_completed(futures):
+            i, split, message = future.result()
+            print(f"[{i}/{total}] {split}/{message}", flush=True)
 
     print(f"\nDone. {total - skipped} ran, {skipped} skipped.")
 

@@ -37,7 +37,7 @@ import argparse
 import json
 import re
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
 
@@ -59,7 +59,9 @@ from judge import Verdict, _resolve_client, judge_record  # noqa: E402
 # --model value -> (judge.py provider, exact API model string).
 MODEL_REGISTRY: dict[str, tuple[str, str]] = {
     "gemini-3.1-pro-preview": ("gemini-pro", "@vertexai-hs3645/gemini-3.1-pro-preview"),
+    "gemini-3.1-flash-preview": ("gemini-flash", "@vertexai-hs3645/gemini-3.1-flash-lite-preview"),
     "deepseek-v4-pro": ("deepseek", "deepseek-v4-pro"),
+    "qwen3-8b": ("qwen", "qwen3-8b"),
 }
 
 # Stage-2 prompt versions. Each loads its own prompt snapshot from
@@ -186,7 +188,8 @@ def run_job(job: dict, *, client, model: str, template: str, guideline: str,
     def _one(rd: dict) -> Verdict:
         try:
             return judge_record(rd, client=client, model=model, template=template,
-                                guideline=guideline, fewshot=fewshot)
+                                guideline=guideline, fewshot=fewshot,
+                                max_tokens=8000)
         except Exception as e:  # noqa: BLE001 - log as a verdict, keep the run going
             return Verdict(claim_id=rd["claim_id"], verdict="api_error",
                            evidence_pointer=None, reason="", error=str(e))
@@ -223,6 +226,8 @@ def main() -> None:
                    help="Only process the first N tasks (smoke test).")
     p.add_argument("--concurrency", type=int, default=8,
                    help="Concurrent claim-level judge calls within a task.")
+    p.add_argument("--job-concurrency", type=int, default=1,
+                   help="Concurrent trajectory-level jobs (default: 1).")
     p.add_argument("--overwrite", action="store_true",
                    help="Re-run tasks whose verdict file already exists.")
     p.add_argument("--ind-dir", default="experiments_v2/real/independent",
@@ -266,16 +271,24 @@ def main() -> None:
     print(f"Jobs: {len(jobs)}  (split={args.split})\n")
 
     totals: dict[str, int] = {}
-    for i, job in enumerate(jobs, 1):
+    def _one_job(index_job: tuple[int, dict]) -> tuple[int, dict, dict]:
+        i, job = index_job
         res = run_job(job, client=client, model=model, template=template,
                       guideline=guideline, fewshot=fewshot,
                       concurrency=args.concurrency, overwrite=args.overwrite,
                       prompts_dir=prompts_dir, verdicts_dir=verdicts_dir,
                       routing_version=routing_version)
-        for k, n in res["counts"].items():
-            totals[k] = totals.get(k, 0) + n
-        tag = res["status"]
-        print(f"[{i}/{len(jobs)}] {job['split']}/{res['stem']}: {tag}  {res['counts']}")
+        return i, job, res
+
+    with ThreadPoolExecutor(max_workers=args.job_concurrency) as ex:
+        futures = [ex.submit(_one_job, item) for item in enumerate(jobs, 1)]
+        completed = (future.result() for future in as_completed(futures))
+        for i, job, res in completed:
+            for k, n in res["counts"].items():
+                totals[k] = totals.get(k, 0) + n
+            tag = res["status"]
+            print(f"[{i}/{len(jobs)}] {job['split']}/{res['stem']}: {tag}  {res['counts']}",
+                  flush=True)
 
     print(f"\nDone. Verdicts -> {verdicts_dir}")
     print(f"Prompts  -> {prompts_dir}")

@@ -31,7 +31,7 @@ PILOT_TRAJECTORIES: dict[str, str] = {
     "I-2_deepseek": "experiments_v2/real/independent/inventory/trajectories/I-2_deepseek_deepseek_chat.json",
 }
 
-STAGE1_DIR = RESEARCH / "eval_v3-1_claim2action" / "stage1" / "results_deepseek_chat" / "independent"
+DEFAULT_STAGE1_DIR = RESEARCH / "eval_v3-1_claim2action" / "stage1" / "results_deepseek_chat"
 
 
 def read_json(path: Path) -> Any:
@@ -72,8 +72,11 @@ def load_audit(traj: dict, traj_path: Path) -> dict | None:
     return read_json(audit_path)
 
 
-def load_stage1_claims(task_id: str) -> dict[int, list[dict]]:
-    path = STAGE1_DIR / f"{task_id}_gemini-pro_v1_judge.json"
+def load_stage1_claims(task_id: str, metadata: dict[str, str], stage1_dir: Path) -> dict[int, list[dict]]:
+    if metadata.get("condition") == "dependent" and metadata.get("chain") not in {None, "single"}:
+        path = stage1_dir / "dependent" / f"{metadata['chain']}_{task_id}_gemini-pro_v1_judge.json"
+    else:
+        path = stage1_dir / "independent" / f"{task_id}_gemini-pro_v1_judge.json"
     if not path.exists():
         return {}
     by_step: dict[int, list[dict]] = {}
@@ -97,8 +100,8 @@ def infer_real_metadata(traj_path: Path) -> dict[str, str]:
     }
 
 
-def infer_experiment_metadata(traj_path: Path) -> dict[str, str]:
-    rel = traj_path.relative_to(EXPERIMENTS_ROOT)
+def infer_experiment_metadata(traj_path: Path, experiments_root: Path = EXPERIMENTS_ROOT) -> dict[str, str]:
+    rel = traj_path.relative_to(experiments_root)
     parts = rel.parts
     condition = parts[0]
     domain = parts[1]
@@ -135,25 +138,40 @@ def traj_key_from_experiment_path(traj_path: Path, traj: dict, metadata: dict[st
     return f"{metadata['chain']}__{base}"
 
 
-def discover_real_trajectories() -> dict[str, str]:
+def traj_key_from_real_path(traj_path: Path, traj: dict, metadata: dict[str, str]) -> str:
+    task_id = traj.get("task_id") or traj_path.name.split("_", 1)[0]
+    suffix = suffix_from_filename(traj_path, task_id)
+    base = f"{task_id}__{suffix}"
+    if metadata["condition"] == "independent":
+        return base
+    return f"{metadata['chain']}__{base}"
+
+
+def discover_real_trajectories(filename_glob: str = "*_deepseek_deepseek_chat.json") -> dict[str, str]:
     trajectories: dict[str, str] = {}
     roots = [REAL_ROOT / "independent", REAL_ROOT / "dependent"]
     for root in roots:
-        for traj_path in sorted(root.glob("**/trajectories/*_deepseek_chat.json")):
+        for traj_path in sorted(root.glob(f"**/trajectories/{filename_glob}")):
             traj = read_json(traj_path)
             metadata = infer_real_metadata(traj_path)
-            traj_key = traj_key_from_path(traj_path, traj, metadata)
+            if filename_glob == "*_deepseek_deepseek_chat.json":
+                traj_key = traj_key_from_path(traj_path, traj, metadata)
+            else:
+                traj_key = traj_key_from_real_path(traj_path, traj, metadata)
             trajectories[traj_key] = str(traj_path.relative_to(RESEARCH))
     return trajectories
 
 
-def discover_experiment_trajectories(filename_glob: str) -> dict[str, str]:
+def discover_experiment_trajectories(
+    filename_glob: str,
+    experiments_root: Path = EXPERIMENTS_ROOT,
+) -> dict[str, str]:
     trajectories: dict[str, str] = {}
-    roots = [EXPERIMENTS_ROOT / "independent", EXPERIMENTS_ROOT / "dependent"]
+    roots = [experiments_root / "independent", experiments_root / "dependent"]
     for root in roots:
         for traj_path in sorted(root.glob(f"**/trajectories/{filename_glob}")):
             traj = read_json(traj_path)
-            metadata = infer_experiment_metadata(traj_path)
+            metadata = infer_experiment_metadata(traj_path, experiments_root)
             traj_key = traj_key_from_experiment_path(traj_path, traj, metadata)
             trajectories[traj_key] = str(traj_path.relative_to(RESEARCH))
     return trajectories
@@ -252,6 +270,7 @@ def build_items(
     window: int = 1,
     sentence_scope: str = "all",
     trajectories: dict[str, str] | None = None,
+    stage1_dir: Path = DEFAULT_STAGE1_DIR,
 ) -> list[dict]:
     items: list[dict] = []
     tasks = load_tasks_registry()
@@ -270,7 +289,7 @@ def build_items(
         sentences_by_step = build_sentences(traj)
         results_by_call = index_results(traj)
         audit_by_call = index_audit(audit)
-        claims_by_step = load_stage1_claims(task_id)
+        claims_by_step = load_stage1_claims(task_id, real_metadata, stage1_dir)
 
         for step in traj.get("steps") or []:
             step_id = int(step["step_id"])
@@ -335,18 +354,27 @@ def main() -> None:
     parser.add_argument("--source", choices=["pilot", "real", "experiments"], default="pilot")
     parser.add_argument("--filename-glob", default="*.json",
                         help="Used with --source experiments, e.g. '*_openai_gpt_4o.json'.")
+    parser.add_argument("--experiments-root", type=Path, default=EXPERIMENTS_ROOT,
+                        help="Trajectory root used with --source experiments.")
     parser.add_argument("--window", type=int, default=1)
     parser.add_argument("--sentence-scope", choices=["all", "window"], default="all",
                         help="Use all trajectory sentences, or only +/- --window steps.")
+    parser.add_argument("--stage1-dir", type=Path, default=DEFAULT_STAGE1_DIR,
+                        help="Stage-1 claim result root with independent/ and dependent/ children.")
     args = parser.parse_args()
 
     if args.source == "real":
-        trajectories = discover_real_trajectories()
+        trajectories = discover_real_trajectories(args.filename_glob)
     elif args.source == "experiments":
-        trajectories = discover_experiment_trajectories(args.filename_glob)
+        trajectories = discover_experiment_trajectories(args.filename_glob, args.experiments_root)
     else:
         trajectories = PILOT_TRAJECTORIES
-    items = build_items(window=args.window, sentence_scope=args.sentence_scope, trajectories=trajectories)
+    items = build_items(
+        window=args.window,
+        sentence_scope=args.sentence_scope,
+        trajectories=trajectories,
+        stage1_dir=args.stage1_dir,
+    )
     write_jsonl(args.out, items)
     by_traj: dict[str, int] = {}
     for item in items:
