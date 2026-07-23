@@ -1,0 +1,659 @@
+{
+  "$defs": {
+    "AgentContext": {
+      "additionalProperties": false,
+      "description": "Context that was available to the evaluated Tau2 agent.",
+      "properties": {
+        "policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy"
+        },
+        "tool_definitions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Tool Definitions",
+          "type": "array"
+        }
+      },
+      "title": "AgentContext",
+      "type": "object"
+    },
+    "CanonicalStep": {
+      "additionalProperties": false,
+      "description": "Agent-only projection consumed by the current claim/action pipeline.",
+      "properties": {
+        "step_id": {
+          "title": "Step Id",
+          "type": "integer"
+        },
+        "source_turn_idx": {
+          "title": "Source Turn Idx",
+          "type": "integer"
+        },
+        "assistant_text": {
+          "default": "",
+          "title": "Assistant Text",
+          "type": "string"
+        },
+        "tool_calls": {
+          "items": {
+            "$ref": "#/$defs/CanonicalToolCall"
+          },
+          "title": "Tool Calls",
+          "type": "array"
+        },
+        "tool_results": {
+          "items": {
+            "$ref": "#/$defs/CanonicalToolResult"
+          },
+          "title": "Tool Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "step_id",
+        "source_turn_idx"
+      ],
+      "title": "CanonicalStep",
+      "type": "object"
+    },
+    "CanonicalToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "requestor": {
+          "const": "assistant",
+          "default": "assistant",
+          "title": "Requestor",
+          "type": "string"
+        },
+        "source_turn_idx": {
+          "title": "Source Turn Idx",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "source_turn_idx"
+      ],
+      "title": "CanonicalToolCall",
+      "type": "object"
+    },
+    "CanonicalToolResult": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "title": "Action Id",
+          "type": "string"
+        },
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "result": {
+          "default": null,
+          "title": "Result"
+        },
+        "status": {
+          "default": "unknown",
+          "enum": [
+            "success",
+            "error",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "source_turn_idx": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Turn Idx"
+        },
+        "audit_record_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Audit Record Index"
+        }
+      },
+      "required": [
+        "action_id",
+        "call_id",
+        "tool_name"
+      ],
+      "title": "CanonicalToolResult",
+      "type": "object"
+    },
+    "EvaluatorContext": {
+      "additionalProperties": false,
+      "description": "Hidden task metadata. This block must never be included in agent prompts.",
+      "properties": {
+        "visibility": {
+          "const": "evaluator_only",
+          "default": "evaluator_only",
+          "title": "Visibility",
+          "type": "string"
+        },
+        "task_description": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Description"
+        },
+        "hidden_user_scenario": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hidden User Scenario"
+        },
+        "initial_state": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Initial State"
+        },
+        "reference_solution": {
+          "$ref": "#/$defs/ReferenceSolution"
+        },
+        "env_assertions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Env Assertions",
+          "type": "array"
+        },
+        "communicate_info": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Communicate Info",
+          "type": "array"
+        },
+        "nl_assertions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Nl Assertions",
+          "type": "array"
+        },
+        "reward_basis": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reward Basis",
+          "type": "array"
+        },
+        "native_reward_info": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Native Reward Info"
+        }
+      },
+      "title": "EvaluatorContext",
+      "type": "object"
+    },
+    "InteractionMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "assistant_turns": {
+          "title": "Assistant Turns",
+          "type": "integer"
+        },
+        "user_turns": {
+          "title": "User Turns",
+          "type": "integer"
+        },
+        "assistant_tool_calls": {
+          "title": "Assistant Tool Calls",
+          "type": "integer"
+        },
+        "user_tool_calls": {
+          "title": "User Tool Calls",
+          "type": "integer"
+        },
+        "is_multi_turn": {
+          "title": "Is Multi Turn",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "assistant_turns",
+        "user_turns",
+        "assistant_tool_calls",
+        "user_tool_calls",
+        "is_multi_turn"
+      ],
+      "title": "InteractionMetrics",
+      "type": "object"
+    },
+    "ReferenceSolution": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "binding": {
+          "default": "reference_only",
+          "enum": [
+            "required",
+            "reference_only"
+          ],
+          "title": "Binding",
+          "type": "string"
+        }
+      },
+      "title": "ReferenceSolution",
+      "type": "object"
+    },
+    "SourceEvent": {
+      "additionalProperties": false,
+      "description": "Chronological source event retained for multi-turn context and replay.",
+      "properties": {
+        "turn_idx": {
+          "title": "Turn Idx",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "system",
+            "user",
+            "assistant",
+            "tool"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "tool_calls": {
+          "items": {
+            "$ref": "#/$defs/SourceToolCall"
+          },
+          "title": "Tool Calls",
+          "type": "array"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "requestor": {
+          "anyOf": [
+            {
+              "enum": [
+                "assistant",
+                "user"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestor"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        }
+      },
+      "required": [
+        "turn_idx",
+        "role"
+      ],
+      "title": "SourceEvent",
+      "type": "object"
+    },
+    "SourceMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "benchmark": {
+          "const": "tau2",
+          "default": "tau2",
+          "title": "Benchmark",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "trial": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trial"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "termination_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Termination Reason"
+        },
+        "git_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Commit"
+        }
+      },
+      "required": [
+        "run_id",
+        "task_id"
+      ],
+      "title": "SourceMetadata",
+      "type": "object"
+    },
+    "SourceToolCall": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "requestor": {
+          "enum": [
+            "assistant",
+            "user"
+          ],
+          "title": "Requestor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "tool_name",
+        "requestor"
+      ],
+      "title": "SourceToolCall",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Portable trajectory plus an agent-only legacy projection.\n\n`steps` deliberately keeps the existing Halluci-Action keys so the current\nclaim extraction and grounding code can read adapted files without importing\nTau2. `events` preserves multi-turn context and user-side actions that must\nnot enter the agent action denominator.",
+  "properties": {
+    "schema_version": {
+      "const": "halluci_action_canonical_trajectory_v1",
+      "default": "halluci_action_canonical_trajectory_v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "trajectory_id": {
+      "title": "Trajectory Id",
+      "type": "string"
+    },
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "task": {
+      "title": "Task",
+      "type": "string"
+    },
+    "agent": {
+      "title": "Agent",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "knowledge_level": {
+      "const": "external_policy",
+      "default": "external_policy",
+      "title": "Knowledge Level",
+      "type": "string"
+    },
+    "visibility_condition": {
+      "const": "external_adapter",
+      "default": "external_adapter",
+      "title": "Visibility Condition",
+      "type": "string"
+    },
+    "visible_context": {
+      "additionalProperties": true,
+      "title": "Visible Context",
+      "type": "object"
+    },
+    "audit_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Audit File"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceMetadata"
+    },
+    "agent_context": {
+      "$ref": "#/$defs/AgentContext"
+    },
+    "evaluator_context": {
+      "$ref": "#/$defs/EvaluatorContext"
+    },
+    "interaction_metrics": {
+      "$ref": "#/$defs/InteractionMetrics"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/SourceEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/CanonicalStep"
+      },
+      "title": "Steps",
+      "type": "array"
+    },
+    "adapter_warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Adapter Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "trajectory_id",
+    "task_id",
+    "task",
+    "agent",
+    "model",
+    "source",
+    "interaction_metrics"
+  ],
+  "title": "CanonicalTrajectory",
+  "type": "object"
+}
