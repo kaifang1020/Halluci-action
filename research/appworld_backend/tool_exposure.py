@@ -107,6 +107,11 @@ ADJACENCY: dict[str, set[str]] = {
     "identity": {"identity"},
 }
 # "tempting wrong action" verbs — a distractor that DOES something (not a passive read)
+# Hard ceiling on the exposed toolset. OpenAI refuses a request with more than 128 function
+# definitions; the other providers are looser, but the cap is applied uniformly so a task
+# presents the same tools to every agent and the cells stay comparable.
+MAX_TOOLS = 128
+
 ACTION_PREFIX = ("create_", "send_", "record_", "settle_", "add_", "place_", "post_", "write_",
                  "approve_", "deny_", "remind_", "subscribe_", "forward_", "reply_", "assign_",
                  "review_", "like_", "play_")
@@ -322,6 +327,19 @@ def build_task_toolset(
                 distractors.append(pool[a].pop())
         neigh_used = []
 
+    # OpenAI rejects a request carrying more than MAX_TOOLS function definitions
+    # ("Invalid 'tools': array too long"), which killed gpt-4o-mini on 988af8e_1 — a
+    # 9-app task whose cores plus distractors reached 141 tools. Other providers accept
+    # more, but a toolset that varies by provider would make the cells incomparable, so
+    # the cap applies to every model. Trim distractors only: the involved apps' cores are
+    # what makes the task doable, while distractors exist to be declined. Dropping from
+    # the tail preserves the semantic ranking (nearby write-tools were ranked first).
+    dropped = 0
+    if len(real) + len(distractors) > MAX_TOOLS:
+        keep = max(0, MAX_TOOLS - len(real))
+        dropped = len(distractors) - keep
+        distractors = distractors[:keep]
+
     return {
         "task_id": seed,
         "involved_apps": involved,
@@ -331,6 +349,7 @@ def build_task_toolset(
         "ratio": ratio,
         "semantic": semantic,
         "neighbor_apps": neigh_used,
+        "distractors_dropped_for_cap": dropped,
     }
 
 

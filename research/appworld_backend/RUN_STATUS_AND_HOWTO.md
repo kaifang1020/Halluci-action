@@ -13,15 +13,65 @@ section 5 (who does what) -> section 4 (commands).
 
 ---
 
+## 0. Who is running what — read this before claiming any task
+
+The task lists live in the repo, not in this document, so they cannot drift from what is
+actually being run:
+
+| File (`research/appworld_backend/tasks/`) | Contents |
+|---|---|
+| `batch_A_baseline_100.json` | 100 tasks — the original baseline. **Claimed, in progress.** |
+| `batch_B_expansion_55.json` | 55 tasks — expansion, one variant per template, difficulty-balanced. **Claimed, in progress.** |
+| `claimed_all.json` | The union, 155 tasks. **Do not start these; they are already running.** |
+| `available_pool.json` | 151 tasks nobody has claimed — one variant per template, so no two entries are the same task with a different name. **Pick from here.** |
+
+To see what is actually finished right now, do not read the snapshot below — run:
+
+```bash
+cd /path/to/repo
+APPWORLD_ROOT=/Users/maokaifang/appworld-root PYTHONPATH=$PWD \
+  /Users/maokaifang/appworld-root/venv/bin/python research/appworld_backend/status.py
+```
+
+It counts artifacts on disk (trajectories and `pipeline_*.html`) and reports both batches plus
+the unclaimed pool. It also emits paste-ready task lists:
+
+```bash
+# tasks still missing a trajectory
+... status.py --todo trajectories
+
+# tasks with a trajectory but no judge output
+... status.py --todo judge
+```
+
+**Claiming work.** Take a slice of `available_pool.json`, write it to a new
+`tasks/batch_C_<yourname>.json`, and commit that file before you start. The point is that the
+claim is visible in git, so the same task never gets run twice. Split by task, never by model —
+a task judged with three of the five models is not comparable with one judged with all five.
+
+Note that `available_pool.json` holds one variant per template on purpose. AppWorld ids sharing
+a prefix (`0d8a4ee_1`, `_2`, `_3`) are the same task with the names swapped, so running all three
+costs 3x and buys very little. If you want more volume, prefer more templates over more variants.
+
+Before running anything, confirm your inputs match — see
+[section 6](#6-verifying-you-are-in-sync). A different `codebook.md` silently changes the policy
+axis, and results scored against different codebooks cannot be pooled.
+
 ## 1. Status snapshot
 
 > This is a **snapshot and it goes stale the moment anyone runs anything.** Do not trust these
-> numbers after work has happened — re-derive them with the counting script in
-> [section 1.4](#14-re-derive-these-numbers-yourself). The numbers are a planning aid, not a
-> source of truth; the files on disk are the source of truth.
+> numbers after work has happened — re-derive them with `status.py` (section 0) or the counting
+> script in [section 1.4](#14-re-derive-these-numbers-yourself). The numbers are a planning aid,
+> not a source of truth; the files on disk are the source of truth.
 
-**Design of the run:** 100 AppWorld tasks x 5 agent models = **500 cells**. A *cell* is one
-`(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
+**Design of the run:** the baseline is 100 AppWorld tasks x 5 agent models = **500 cells**; a
+55-task expansion (batch B) brings the claimed total to 155 tasks / **775 cells**. A *cell* is
+one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
+
+> **The tables in this section were written when batch A stood at 355 trajectories / 281 judged
+> and describe batch A only.** They are kept as a record of that point in time. For live numbers
+> across both batches run `status.py` (section 0) — at the time batch B was added the totals were
+> 771/775 trajectories and 367/775 judged.
 
 The five agent models and their filesystem tags are defined in `judge_all.py` (`MODEL_TAG`) and
 `gen_trajectories.py` (`MODELS`):
