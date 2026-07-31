@@ -99,9 +99,32 @@ def main() -> None:
     p.add_argument("--batch", choices=["A", "B", "all"], default="all")
     p.add_argument("--todo", choices=["trajectories", "judge"],
                    help="print comma-separated task ids that still need this stage")
+    p.add_argument("--emit", action="store_true",
+                   help="write tasks/completed_cells.json for committing, then exit")
     args = p.parse_args()
 
     traj, judged = scan()
+
+    if args.emit:
+        # A small, committable record of which cells are finished. This is what stops a
+        # collaborator repeating work: the runs/ artifacts are hundreds of MB and are not
+        # re-pushed on every update, so this file is how "already done" travels.
+        out = {
+            "cells_with_trajectory": {t: sorted(m) for t, m in sorted(traj.items()) if m},
+            "cells_judged": {t: sorted(m) for t, m in sorted(judged.items()) if m},
+            "totals": {
+                "tasks_seen": len(set(traj) | set(judged)),
+                "trajectory_cells": sum(len(m) for m in traj.values()),
+                "judged_cells": sum(len(m) for m in judged.values()),
+            },
+        }
+        dest = TASKS / "completed_cells.json"
+        dest.write_text(json.dumps(out, indent=0, sort_keys=True))
+        print(f"wrote {dest}")
+        print(f"  {out['totals']['trajectory_cells']} trajectory cells, "
+              f"{out['totals']['judged_cells']} judged cells, "
+              f"{out['totals']['tasks_seen']} tasks")
+        return
     batches = list(BATCHES) if args.batch == "all" else [args.batch]
     all_tasks: list[str] = []
     for b in batches:

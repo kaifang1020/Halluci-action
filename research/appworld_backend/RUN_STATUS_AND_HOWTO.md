@@ -68,10 +68,29 @@ axis, and results scored against different codebooks cannot be pooled.
 55-task expansion (batch B) brings the claimed total to 155 tasks / **775 cells**. A *cell* is
 one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 
-> **The tables in this section were written when batch A stood at 355 trajectories / 281 judged
-> and describe batch A only.** They are kept as a record of that point in time. For live numbers
-> across both batches run `status.py` (section 0) — at the time batch B was added the totals were
-> 771/775 trajectories and 367/775 judged.
+> **The tables further down in this section describe batch A at 355 trajectories / 281 judged**
+> and are kept only as a record of that point. Use the block below, or better, run `status.py`.
+
+### Live counts (regenerated 2026-07-31)
+
+| batch | tasks | trajectories | judged | all-5-models judged |
+|---|---|---|---|---|
+| A (baseline) | 100 | 496 / 500 | **419 / 500** (83.8%) | 59 / 100 |
+| B (expansion) | 55 | 275 / 275 | **39 / 275** (14.2%) | 7 / 55 |
+| **total** | **155** | **771 / 775** | **458 / 775** (59.1%) | 66 / 155 |
+
+Judged cells per model, out of 155 tasks: `ds_chat` 69, `ds_reasoner` 75, `qwen8b` 105,
+`gemflash` 106, `gpt4omini` 103. DeepSeek trails because those two models were blocked on an
+account balance for part of the run.
+
+`tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
+is committed on every progress push, so a collaborator can diff it against their own plan without
+pulling the multi-hundred-MB `runs/` tree. Regenerate it with:
+
+```bash
+APPWORLD_ROOT=/Users/maokaifang/appworld-root PYTHONPATH=$PWD \
+  /Users/maokaifang/appworld-root/venv/bin/python research/appworld_backend/status.py --emit
+```
 
 The five agent models and their filesystem tags are defined in `judge_all.py` (`MODEL_TAG`) and
 `gen_trajectories.py` (`MODELS`):
