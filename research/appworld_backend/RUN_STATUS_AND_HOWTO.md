@@ -124,17 +124,19 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 > **The tables further down in this section describe batch A at 355 trajectories / 281 judged**
 > and are kept only as a record of that point. Use the block below, or better, run `status.py`.
 
-### Live counts (regenerated 2026-07-31)
+### Live counts (regenerated 2026-08-01)
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
-| A (baseline) | 100 | 496 / 500 | **419 / 500** (83.8%) | 59 / 100 |
-| B (expansion) | 55 | 275 / 275 | **39 / 275** (14.2%) | 7 / 55 |
-| **total** | **155** | **771 / 775** | **458 / 775** (59.1%) | 66 / 155 |
+| A (baseline) | 100 | 496 / 500 | **465 / 500** (93.0%) | 76 / 100 |
+| B (expansion) | 55 | 275 / 275 | **172 / 275** (62.5%) | 24 / 55 |
+| **total** | **155** | **771 / 775** | **637 / 775** (82.2%) | **100 / 155** |
 
-Judged cells per model, out of 155 tasks: `ds_chat` 69, `ds_reasoner` 75, `qwen8b` 105,
-`gemflash` 106, `gpt4omini` 103. DeepSeek trails because those two models were blocked on an
-account balance for part of the run.
+Judged cells per model, out of 155 tasks: `ds_chat` 113, `ds_reasoner` 124, `qwen8b` 132,
+`gemflash` 137, `gpt4omini` 131. Baseline `qwen8b` is complete at 100/100.
+
+**100 tasks now have all five models judged** and are ready to analyse as a block; the other 55
+are partial and should not be mixed into a cross-model comparison until complete.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
 is committed on every progress push, so a collaborator can diff it against their own plan without
