@@ -128,14 +128,15 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
-| A (baseline) | 100 | 496 / 500 | **465 / 500** (93.0%) | 76 / 100 |
-| B (expansion) | 55 | 275 / 275 | **172 / 275** (62.5%) | 24 / 55 |
-| **total** | **155** | **771 / 775** | **637 / 775** (82.2%) | **100 / 155** |
+| A (baseline) | 100 | 496 / 500 | **469 / 500** (93.8%) | 80 / 100 |
+| B (expansion) | 55 | 275 / 275 | **208 / 275** (75.6%) | 33 / 55 |
+| **total** | **155** | **771 / 775** | **677 / 775** (87.4%) | **113 / 155** |
 
-Judged cells per model, out of 155 tasks: `ds_chat` 113, `ds_reasoner` 124, `qwen8b` 132,
-`gemflash` 137, `gpt4omini` 131. Baseline `qwen8b` is complete at 100/100.
+Judged cells per model, out of 155 tasks: `ds_chat` 120, `ds_reasoner` 134, `qwen8b` 142,
+`gemflash` 143, `gpt4omini` 138. In the baseline both `qwen8b` and `gemflash` are complete at
+100/100; the remaining gap is the two DeepSeek models.
 
-**100 tasks now have all five models judged** and are ready to analyse as a block; the other 55
+**113 tasks now have all five models judged** and are ready to analyse as a block; the other 42
 are partial and should not be mixed into a cross-model comparison until complete.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
