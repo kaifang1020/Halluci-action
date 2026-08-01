@@ -57,6 +57,59 @@ Before running anything, confirm your inputs match — see
 [section 6](#6-verifying-you-are-in-sync). A different `codebook.md` silently changes the policy
 axis, and results scored against different codebooks cannot be pooled.
 
+## 0b. Batch C — the remaining templates, split two ways
+
+`claimed_all.json` (155 tasks) is batch A + B and is already running. Batch C covers everything
+left, and is the work to divide:
+
+| File | Tasks | Owner |
+|---|---|---|
+| `tasks/batch_C_you.json` | 112 | the original runner |
+| `tasks/batch_C_teammate.json` | 111 | the collaborator |
+
+**Why 223 tasks and not 577.** 577 AppWorld tasks remain unclaimed, but they are only 223
+distinct templates — ids sharing a prefix (`0d8a4ee_1/_2/_3`) are one task with the names
+swapped, and measured HAR across such variants is nearly identical. Batch C therefore takes one
+variant per template: full coverage of every task type for 40% of the compute. Running all 577
+costs 2885 cells; 223 templates costs 1115.
+
+The two halves were interleaved after sorting by difficulty and primary app, so they match
+closely: difficulty 30/40/42 versus 30/40/41, and comparable app mixes. Either half is
+independently analysable if the other stalls.
+
+### Before you split: check whether a second key actually adds throughput
+
+This is unresolved and it decides whether splitting is worth doing at all.
+
+Measured on this machine: raising one judge process from 4 to 6 workers made per-cell latency
+jump from 297s to 2018s — nearly 7x — for no throughput gain. Concurrency on a **single key** is
+saturated at about 4 workers. What is *not* known is whether a **different** key gets its own
+quota, or whether the NYU gateway caps total capacity across keys. If it is the latter, a second
+runner buys nothing and simply halves everyone's speed.
+
+Twenty minutes settles it. While the first runner is judging normally:
+
+```bash
+# On the teammate's machine, with THEIR key in research/.env — judge just a few cells
+APPWORLD_ROOT=/Users/maokaifang/appworld-root PYTHONPATH=$PWD \
+  /Users/maokaifang/appworld-root/venv/bin/python research/appworld_backend/judge_all.py \
+  --tasks "$(python -c "import json;print(','.join(json.load(open('research/appworld_backend/tasks/batch_C_teammate.json'))[:4]))")" \
+  --workers 4 --judge gemini-pro --timeout 1800
+```
+
+Then compare the **first runner's** per-cell times before and during that window:
+
+```bash
+grep -oE 'HAR=[0-9.]+ .*\(([0-9.]+)s\)' <judge log> | grep -oE '\(([0-9.]+)s\)' | tail -20
+```
+
+- Times roughly unchanged -> the keys have separate quota. Split the work; expect close to 2x.
+- Times climb noticeably -> capacity is shared. Do **not** split judging: have one person judge
+  while the other generates trajectories, which hit the agent providers instead and do not
+  contend.
+
+Record the outcome here so nobody re-litigates it.
+
 ## 1. Status snapshot
 
 > This is a **snapshot and it goes stale the moment anyone runs anything.** Do not trust these

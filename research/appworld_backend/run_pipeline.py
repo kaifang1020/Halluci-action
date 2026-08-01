@@ -90,8 +90,20 @@ JUDGE_CLIENT_TIMEOUT = float(os.environ.get("HALLUCI_JUDGE_TIMEOUT", "1800"))
 JUDGE_CLIENT_RETRIES = int(os.environ.get("HALLUCI_JUDGE_RETRIES", "4"))
 
 
+# stage1 asks for the whole trajectory's claims in one response and hardcodes
+# max_tokens=32000. On long AppWorld trajectories the JSON is cut mid-object
+# (finish_reason=length), and the module's own parser then dies on the fragment with
+# "JSONDecodeError: Expecting ',' delimiter" -- 12 tasks, ~18 cells, failed this way and
+# no amount of retrying helps because the truncation is deterministic. judge.py itself
+# suggests raising max_tokens; the gateway accepts up to 65535 for this model.
+JUDGE_MAX_TOKENS = int(os.environ.get("HALLUCI_JUDGE_MAX_TOKENS", "65535"))
+
+
 def _patch_client_timeout(mod) -> None:
-    """Wrap a judge module's `_resolve_client` so its OpenAI client gets a long timeout."""
+    """Give a judge module's client a long timeout and a large output budget.
+
+    Both are runtime overrides on the loaded module; the tracked judge.py is untouched.
+    """
     orig = getattr(mod, "_resolve_client", None)
     if orig is None or getattr(mod, "_timeout_patched", False):
         return
@@ -102,6 +114,17 @@ def _patch_client_timeout(mod) -> None:
             client = client.with_options(timeout=JUDGE_CLIENT_TIMEOUT,
                                          max_retries=JUDGE_CLIENT_RETRIES)
         except Exception:  # noqa: BLE001 - never let the tuning break the run
+            return client, model
+        # Raise any max_tokens the module passes, without lowering an already-larger one.
+        create = client.chat.completions.create
+
+        def create_with_budget(*a, **kw):
+            kw["max_tokens"] = max(int(kw.get("max_tokens") or 0), JUDGE_MAX_TOKENS)
+            return create(*a, **kw)
+
+        try:
+            client.chat.completions.create = create_with_budget
+        except Exception:  # noqa: BLE001 - some SDK versions expose read-only attrs
             pass
         return client, model
 
