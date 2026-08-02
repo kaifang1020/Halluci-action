@@ -1,0 +1,148 @@
+{
+  "info": {
+    "git_commit": "demo",
+    "agent_info": {
+      "implementation": "llm_agent",
+      "llm": "demo-agent"
+    },
+    "environment_info": {
+      "domain_name": "demo_service",
+      "policy": "Read account state before changing it. Obtain explicit confirmation before updates.",
+      "tool_defs": []
+    }
+  },
+  "tasks": [
+    {
+      "id": "demo-1",
+      "description": {
+        "purpose": "Check an account and update its notification preference."
+      },
+      "user_scenario": {
+        "instructions": {
+          "known_info": "The account id is ACC-7."
+        }
+      },
+      "initial_state": null,
+      "evaluation_criteria": {
+        "actions": [
+          {
+            "action_id": "demo_action_0",
+            "requestor": "assistant",
+            "name": "get_account",
+            "arguments": {
+              "account_id": "ACC-7"
+            }
+          }
+        ],
+        "env_assertions": [],
+        "communicate_info": ["enabled"],
+        "nl_assertions": [],
+        "reward_basis": ["DB", "COMMUNICATE"]
+      }
+    }
+  ],
+  "simulations": [
+    {
+      "id": "demo-run-1",
+      "task_id": "demo-1",
+      "trial": 0,
+      "seed": 300,
+      "termination_reason": "user_stop",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "How can I help?",
+          "tool_calls": null,
+          "turn_idx": 0
+        },
+        {
+          "role": "user",
+          "content": "Please check account ACC-7 and enable notifications.",
+          "tool_calls": null,
+          "turn_idx": 1
+        },
+        {
+          "role": "assistant",
+          "content": "I'll check account ACC-7 first.",
+          "tool_calls": [
+            {
+              "id": "agent-call-1",
+              "name": "get_account",
+              "arguments": {
+                "account_id": "ACC-7"
+              },
+              "requestor": "assistant"
+            }
+          ],
+          "turn_idx": 2
+        },
+        {
+          "id": "agent-call-1",
+          "role": "tool",
+          "content": "{\"account_id\": \"ACC-7\", \"notifications\": false}",
+          "requestor": "assistant",
+          "error": false,
+          "turn_idx": 3
+        },
+        {
+          "role": "user",
+          "content": "Yes, enable them.",
+          "tool_calls": [
+            {
+              "id": "user-call-1",
+              "name": "record_confirmation",
+              "arguments": {
+                "account_id": "ACC-7"
+              },
+              "requestor": "user"
+            }
+          ],
+          "turn_idx": 4
+        },
+        {
+          "id": "user-call-1",
+          "role": "tool",
+          "content": "{\"confirmed\": true}",
+          "requestor": "user",
+          "error": false,
+          "turn_idx": 5
+        },
+        {
+          "role": "assistant",
+          "content": "I'll enable notifications for ACC-7 now.",
+          "tool_calls": [
+            {
+              "id": "agent-call-2",
+              "name": "update_notifications",
+              "arguments": {
+                "account_id": "ACC-7",
+                "enabled": true
+              },
+              "requestor": "assistant"
+            }
+          ],
+          "turn_idx": 6
+        },
+        {
+          "id": "agent-call-2",
+          "role": "tool",
+          "content": "{\"status\": \"success\", \"account_id\": \"ACC-7\", \"enabled\": true}",
+          "requestor": "assistant",
+          "error": false,
+          "turn_idx": 7
+        },
+        {
+          "role": "assistant",
+          "content": "Notifications are now enabled for ACC-7.",
+          "tool_calls": null,
+          "turn_idx": 8
+        }
+      ],
+      "reward_info": {
+        "reward": 1.0,
+        "reward_basis": ["DB", "COMMUNICATE"]
+      }
+    }
+  ]
+}
+

@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date, datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 PACKAGE_ROOT = Path(__file__).resolve().parent
+load_dotenv()
+load_dotenv(PACKAGE_ROOT / ".env", override=True)
+
 PROMPTS_DIR = PACKAGE_ROOT / "prompts"
-RUNS_DIR = PACKAGE_ROOT / "experiments" / "runs"
+RUNS_DIR = PACKAGE_ROOT / "experiments_v1"
 
 PROVIDER_ENV_VARS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
-    "qwen": "DASHSCOPE_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "qwen": "QWEN_API_KEY",
     "kimi": "MOONSHOT_API_KEY",
 }
 
@@ -26,9 +30,52 @@ PROVIDER_ALIASES = {
 
 PROVIDER_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
-    "qwen": "https://dashscope.aliyuncs.com/compatible/v1",
+    "gemini": "https://ai-gateway.apps.cloud.rt.nyu.edu/v1",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "kimi": "https://api.moonshot.cn/v1",
 }
+
+BENCHMARK_CURRENT_DATE = os.getenv("BENCHMARK_CURRENT_DATE", "2026-05-08")
+BENCHMARK_CURRENT_TIME = os.getenv("BENCHMARK_CURRENT_TIME", "09:00:00")
+BENCHMARK_CURRENT_DATETIME = os.getenv("BENCHMARK_CURRENT_DATETIME", "")
+BENCHMARK_TIMEZONE = os.getenv("BENCHMARK_TIMEZONE", "Asia/Shanghai")
+
+
+def _env_first(*names: str, default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def benchmark_timezone() -> ZoneInfo:
+    return ZoneInfo(BENCHMARK_TIMEZONE)
+
+
+def benchmark_now() -> datetime:
+    tz = benchmark_timezone()
+    if BENCHMARK_CURRENT_DATETIME:
+        parsed = datetime.fromisoformat(BENCHMARK_CURRENT_DATETIME)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=tz)
+        return parsed.astimezone(tz)
+    current_date = date.fromisoformat(BENCHMARK_CURRENT_DATE)
+    current_time = time.fromisoformat(BENCHMARK_CURRENT_TIME)
+    return datetime.combine(current_date, current_time, tzinfo=tz)
+
+
+def benchmark_today() -> date:
+    return benchmark_now().date()
+
+
+def benchmark_context_text() -> str:
+    current = benchmark_now()
+    return (
+        f"Current benchmark datetime: {current.isoformat()} ({BENCHMARK_TIMEZONE}).\n"
+        "Use this as today's date/time for all relative-date instructions such as "
+        "today, yesterday, last month, next Monday, and overdue."
+    )
 
 
 @dataclass(slots=True)
@@ -37,7 +84,7 @@ class AgentConfig:
     model: str
     api_key: str
     base_url: str | None = None
-    temperature: float = 0.7
+    temperature: float = 0.0
     max_tokens: int = 2000
     system_prompt: str = ""
     knowledge_level: str = "KL1"
@@ -46,7 +93,7 @@ class AgentConfig:
 @dataclass(slots=True)
 class OdooConfig:
     url: str = os.getenv("ODOO_URL", "http://localhost:8069")
-    db: str = os.getenv("ODOO_DB", "odoo_research")
+    db: str = _env_first("ODOO_DB", "ODOO_DB_NAME", default="odoo_research")
     username: str = os.getenv("ODOO_USER", "admin")
     password: str = os.getenv("ODOO_PASSWORD", "admin")
 
@@ -55,7 +102,7 @@ class OdooConfig:
 class PostgresConfig:
     host: str = os.getenv("PGHOST", "localhost")
     port: int = int(os.getenv("PGPORT", "5432"))
-    dbname: str = os.getenv("PGDATABASE", "odoo_research")
+    dbname: str = _env_first("PGDATABASE", "ODOO_DB", "ODOO_DB_NAME", default="odoo_research")
     user: str = os.getenv("PGUSER", "odoo")
     password: str = os.getenv("PGPASSWORD", "odoo_pw")
 
@@ -78,10 +125,13 @@ def resolve_api_key(provider: str, explicit_key: str | None = None) -> str:
         return explicit_key
     env_var = provider_env_var(provider)
     api_key = os.getenv(env_var, "")
+    if not api_key and normalize_provider(provider) == "qwen":
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
     if not api_key:
+        fallback = " or DASHSCOPE_API_KEY" if normalize_provider(provider) == "qwen" else ""
         raise ValueError(
             f"Missing API key for provider '{provider}'. "
-            f"Set {env_var} or pass --api-key."
+            f"Set {env_var}{fallback} or pass --api-key."
         )
     return api_key
 
@@ -109,7 +159,7 @@ def build_agent_config(
     knowledge_level: str,
     api_key: str | None = None,
     base_url: str | None = None,
-    temperature: float = 0.7,
+    temperature: float = 0.0,
     max_tokens: int = 2000,
 ) -> AgentConfig:
     normalized_provider = normalize_provider(provider)

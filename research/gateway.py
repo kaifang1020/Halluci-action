@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,14 +10,29 @@ from typing import Any
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import Json, RealDictCursor
-import structlog
+try:
+    import structlog
+except ModuleNotFoundError:  # pragma: no cover - local runner convenience
+    structlog = None
 
 from research.config import OdooConfig, PostgresConfig
 from research.tools.odoo_tools import OdooToolExecutor
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__) if structlog else logging.getLogger(__name__)
 
 TOOL_TABLE_MAP: dict[str, list[str]] = {
+    "search_sale_orders": ["sale_order", "sale_order_line"],
+    "get_sale_order": ["sale_order", "sale_order_line"],
+    "confirm_sale_order": ["sale_order", "stock_picking", "stock_move"],
+    "cancel_sale_order": ["sale_order", "stock_picking", "stock_move", "mail_message"],
+    "create_sale_order": ["sale_order", "sale_order_line"],
+    "search_customers": ["res_partner"],
+    "create_customer": ["res_partner"],
+    "search_products": ["product_product", "product_template", "stock_quant"],
+    "get_product": ["product_product", "product_template", "stock_quant"],
+    "update_product_price": ["product_product", "product_template", "mail_message"],
+    "search_invoices": ["account_move"],
+    "search_leads": ["crm_lead"],
     "get_order": ["pos_order", "pos_order_line"],
     "process_refund": ["pos_order", "account_move"],
     "cancel_order": ["pos_order"],
@@ -27,7 +43,7 @@ TOOL_TABLE_MAP: dict[str, list[str]] = {
     "log_interaction": ["mail_message"],
     "send_quote": ["sale_order", "sale_order_line"],
     "mark_opportunity_won": ["crm_lead"],
-    "check_stock": ["stock_quant"],
+    "check_stock": ["stock_quant", "stock_location"],
     "update_inventory": ["stock_quant", "stock_move"],
     "transfer_stock": ["stock_picking", "stock_move", "stock_move_line"],
     "trigger_reorder": ["stock_warehouse_orderpoint"],
@@ -42,6 +58,51 @@ TOOL_TABLE_MAP: dict[str, list[str]] = {
     "close_ticket": ["helpdesk_ticket", "project_task"],
     "escalate_ticket": ["helpdesk_ticket", "project_task", "mail_message"],
     "get_open_tickets": ["helpdesk_ticket", "project_task"],
+    "update_sale_order_discount": ["sale_order", "sale_order_line", "mail_message"],
+    "create_delivery_backorder": ["sale_order", "stock_picking", "stock_move", "mail_message"],
+    "search_stock_locations": ["stock_location"],
+    "search_reorder_rules": ["stock_warehouse_orderpoint"],
+    "apply_inventory_adjustment": ["stock_quant", "stock_move", "mail_message"],
+    "get_invoice": ["account_move", "account_move_line"],
+    "create_credit_note": ["account_move", "account_move_line", "mail_message"],
+    "reconcile_payment": ["account_move", "mail_message"],
+    "post_invoice": ["account_move", "mail_message"],
+    "flag_invoice_for_review": ["account_move", "mail_message"],
+    "get_lead": ["crm_lead"],
+    "update_lead_assignee": ["crm_lead", "mail_message"],
+    "flag_customer_duplicate": ["res_partner", "mail_message"],
+    "search_users": ["res_users"],
+    "search_pos_orders": ["pos_order", "pos_order_line"],
+    "get_pos_session_summary": ["pos_order"],
+    "search_employees": ["hr_employee"],
+    "search_leave_requests": ["hr_leave"],
+    "get_leave_balance": ["hr_leave", "hr_leave_allocation"],
+    "search_tickets": ["helpdesk_ticket", "project_task"],
+    "get_ticket": ["helpdesk_ticket", "project_task", "mail_message"],
+    "search_vendors": ["res_partner", "product_supplierinfo"],
+    "get_vendor_pricelist": ["product_supplierinfo"],
+    "search_purchase_orders": ["purchase_order", "purchase_order_line"],
+    "get_purchase_order": ["purchase_order", "purchase_order_line", "stock_picking"],
+    "create_purchase_order": ["purchase_order", "purchase_order_line", "mail_message"],
+    "confirm_purchase_order": ["purchase_order", "mail_message"],
+    "receive_purchase_order": ["purchase_order", "stock_quant", "mail_message"],
+    "create_vendor_return": ["purchase_order", "stock_quant", "mail_message"],
+    "search_boms": ["mrp_bom", "mrp_bom_line"],
+    "get_bom": ["mrp_bom", "mrp_bom_line"],
+    "search_production_orders": ["mrp_production", "stock_move"],
+    "get_production_order": ["mrp_production", "stock_move"],
+    "create_production_order": ["mrp_production", "stock_move", "mail_message"],
+    "start_production_order": ["mrp_production", "stock_move"],
+    "create_bom_version": ["mrp_bom", "mrp_bom_line", "mail_message"],
+    "archive_bom": ["mrp_bom", "mail_message"],
+    "search_projects": ["project_project"],
+    "get_project": ["project_project", "project_task"],
+    "search_project_tasks": ["project_task"],
+    "get_project_task": ["project_task"],
+    "create_project_task": ["project_task"],
+    "reassign_project_task": ["project_task", "mail_message"],
+    "close_project_task": ["project_task", "mail_message"],
+    "get_project_workload": ["project_task", "res_users"],
 }
 
 

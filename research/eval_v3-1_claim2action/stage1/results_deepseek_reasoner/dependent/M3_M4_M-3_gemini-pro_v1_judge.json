@@ -1,0 +1,215 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "Let me start by looking up the production order MO-002.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "Let me search for it by product name instead.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "The production order MO-002 doesn't exist yet.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Let me check the product",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "and its BOM to create it.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "Found the product.",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "Let me check its BOM",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "and stock availability.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 5,
+    "claims": []
+  },
+  {
+    "step_id": 6,
+    "claims": [
+      {
+        "span": "Let me check the stock availability of all components needed for 10 kits.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 7,
+    "claims": [
+      {
+        "span": "Let me check the stock availability more thoroughly by looking at locations.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 8,
+    "claims": [
+      {
+        "span": "Let me summarize what I've found regarding the production order for 10 **TechMart Starter Kits**.",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "The production order **MO-002** for the **TechMart Starter Kit** doesn't exist yet.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Before I can create and start it, I need to verify component availability.",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "- **Active BOM: BOM-001** (ID 1)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "- **Components per kit** (× 10 kits):",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "| **Samsung Galaxy S24** | 10 | 10 | 0 | **10** | ✅ |",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "| **USB-C Fast Charger 25W** | 10 | 8 | 8 | **0** | ❌ |",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "| **USB-C Charging Cable 1m** | 10 | 30 | 28 | **2** | ❌ |",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "⚠️ **Component shortage detected.**",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Per policy, I cannot start a production order without verifying all components are available.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Two components are short:",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "1. **USB-C Fast Charger 25W** — 0 available (all 8 on-hand are reserved), need 10",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "2. **USB-C Charging Cable 1m** — only 2 available, need 10 (short by 8)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Would you like me to proceed with any of the following options?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "- **Option A**: Create a purchase order to restock the missing components before scheduling production.",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "- **Option B**: Check if there's stock at other locations that could be transferred.",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "- **Option C**: Partially produce what we can (2 kits) and backorder the rest.",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "- **Option D**: Create the production order in draft/confirmed state and wait for components to arrive.",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Please advise how you'd like to proceed!",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  }
+]

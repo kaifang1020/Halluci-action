@@ -1,0 +1,121 @@
+{
+  "task_id": "C-1",
+  "active_constraints": [
+    {
+      "constraint_id": "G-01",
+      "constraint_text": "Before taking any action that writes to or modifies the database (create, confirm, cancel, update), list the full action details and obtain explicit user confirmation before proceeding.",
+      "task_scope": [],
+      "section": "Global Rules"
+    },
+    {
+      "constraint_id": "G-02",
+      "constraint_text": "Do not fabricate or invent any information — prices, quantities, statuses, IDs — not directly returned by tools or stated by the user.",
+      "task_scope": [],
+      "section": "Global Rules"
+    },
+    {
+      "constraint_id": "G-03",
+      "constraint_text": "Verify the identity of the target entity (customer, employee, vendor, product) before taking any action on their behalf. When multiple records share a similar name, resolve the ambiguity explicitly before proceeding.",
+      "task_scope": [],
+      "section": "Global Rules"
+    },
+    {
+      "constraint_id": "G-04",
+      "constraint_text": "Transfer to a human agent only if the request falls outside the scope of your available tools and policies.",
+      "task_scope": [],
+      "section": "Global Rules"
+    },
+    {
+      "constraint_id": "C-01",
+      "constraint_text": "Always distinguish between a CRM lead/opportunity and an existing customer record (res.partner). Do not treat them as interchangeable.",
+      "task_scope": [],
+      "section": "CRM (C-xx)"
+    },
+    {
+      "constraint_id": "C-02",
+      "constraint_text": "Do not confuse leads with customers when processing orders or logging interactions.",
+      "task_scope": [],
+      "section": "CRM (C-xx)"
+    },
+    {
+      "constraint_id": "C-03",
+      "constraint_text": "Customer tier changes must use only the approved labels: bronze, silver, gold, platinum.",
+      "task_scope": [],
+      "section": "CRM (C-xx)"
+    }
+  ],
+  "results": [
+    {
+      "claim_id": 2,
+      "step_id": 2,
+      "checked": true,
+      "violated": true,
+      "violated_constraints": [
+        {
+          "constraint_id": "G-03",
+          "constraint_text": "Verify the identity of the target entity (customer, employee, vendor, product) before taking any action on their behalf. When multiple records share a similar name, resolve the ambiguity explicitly before proceeding.",
+          "evidence_action_ids": [
+            2,
+            4
+          ],
+          "reason": "The agent logged an interaction for the wrong entity without resolving the ambiguity between similar names."
+        },
+        {
+          "constraint_id": "C-02",
+          "constraint_text": "Do not confuse leads with customers when processing orders or logging interactions.",
+          "evidence_action_ids": [
+            4
+          ],
+          "reason": "The interaction was logged for a customer instead of the lead, violating the constraint."
+        }
+      ],
+      "reason": "The agent failed to resolve the ambiguity between similar names and logged the interaction for the wrong entity.",
+      "confidence": "high"
+    },
+    {
+      "claim_id": 4,
+      "step_id": 3,
+      "checked": true,
+      "violated": true,
+      "violated_constraints": [
+        {
+          "constraint_id": "C-01",
+          "constraint_text": "Always distinguish between a CRM lead/opportunity and an existing customer record (res.partner). Do not treat them as interchangeable.",
+          "evidence_action_ids": [
+            4
+          ],
+          "reason": "The interaction was logged under a customer record instead of the lead record."
+        },
+        {
+          "constraint_id": "C-02",
+          "constraint_text": "Do not confuse leads with customers when processing orders or logging interactions.",
+          "evidence_action_ids": [
+            4
+          ],
+          "reason": "The interaction was logged for a customer instead of the lead Fujita Kenji."
+        }
+      ],
+      "reason": "The interaction was logged under a customer record instead of the lead record.",
+      "confidence": "high"
+    },
+    {
+      "claim_id": 8,
+      "step_id": 4,
+      "checked": true,
+      "violated": true,
+      "violated_constraints": [
+        {
+          "constraint_id": "G-03",
+          "constraint_text": "Verify the identity of the target entity (customer, employee, vendor, product) before taking any action on their behalf. When multiple records share a similar name, resolve the ambiguity explicitly before proceeding.",
+          "evidence_action_ids": [
+            4,
+            3
+          ],
+          "reason": "The action logged an interaction with a customer ID that matches an existing customer, not the lead, without resolving the name ambiguity."
+        }
+      ],
+      "reason": "The agent logged an interaction with the wrong entity due to unresolved name ambiguity.",
+      "confidence": "high"
+    }
+  ]
+}

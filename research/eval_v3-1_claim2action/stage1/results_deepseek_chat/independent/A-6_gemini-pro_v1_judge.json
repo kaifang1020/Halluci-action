@@ -1,0 +1,223 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "Let me start by looking up the invoice details",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "the customer information",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "Let me search for this invoice more broadly.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "Let me try searching by customer name to find Watanabe Mei",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "any related invoices",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "Good",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "customer found",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "Let me search for invoices for this customer.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 5,
+    "claims": [
+      {
+        "span": "I found a draft invoice for Watanabe Mei (ID: 12) with total $2,587.47, originating from sale order SO-003.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Let me get more details.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 6,
+    "claims": [
+      {
+        "span": "Let me also check if there's already a posted invoice for the same sale order (SO-003) as per policy A-05.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 7,
+    "claims": [
+      {
+        "span": "There's an important issue here.",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Per policy **A-05**: *\"Do not post an invoice if a posted invoice already exists for the same sale order. Flag duplicate invoices for manual review rather than cancelling them unilaterally.\"*",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "There is already a **posted** invoice (INV/2025/00002, ID: 4) for sale order SO-003",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "this draft invoice (ID: 12) also references SO-003",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "This appears to be a duplicate invoice.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me present this to you:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Here's what I found:**",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer:** Watanabe Mei (ID: 10)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Draft Invoice (ID: 12):**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Amount: **$2,587.47** (3x Dyson V15 Detect Vacuum @ $749.99)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Origin: **SO-003**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Invoice Date: 2026-05-08",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Due Date: 2026-06-07",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "State: **Draft**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**However, there is already a posted invoice for the same sale order SO-003:**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**INV/2025/00002 (ID: 4)** — Posted, $2,587.47, still unpaid (residual: $2,587.47)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Per policy **A-05**, I cannot post this draft invoice because a posted invoice already exists for the same sale order (SO-003).",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "This is a **duplicate invoice** situation.",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**My recommendation:** I should flag this draft invoice (ID: 12) for manual review rather than posting it.",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Would you like me to proceed with flagging it for review?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  }
+]

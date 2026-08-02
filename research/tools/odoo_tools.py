@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from urllib import error, request
 
-import structlog
+try:
+    import structlog
+except ModuleNotFoundError:  # pragma: no cover - local runner convenience
+    structlog = None
 
 from research.config import OdooConfig
+from research.config import benchmark_today
 
-logger = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__) if structlog else logging.getLogger(__name__)
 
 
 class OdooRPCError(RuntimeError):
@@ -109,6 +114,7 @@ class OdooJSONRPCClient:
         fields: list[str] | None = None,
         limit: int | None = None,
         order: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         kwargs: dict[str, Any] = {}
         if fields:
@@ -117,6 +123,8 @@ class OdooJSONRPCClient:
             kwargs["limit"] = limit
         if order:
             kwargs["order"] = order
+        if context:
+            kwargs["context"] = context
         return self.execute_kw(model, "search_read", [domain], kwargs)
 
     def create(self, model: str, values: dict[str, Any]) -> int:
@@ -241,6 +249,64 @@ class OdooToolExecutor:
                 return category.split(":", 1)[1].strip()
         return None
 
+    def _fields(self, model: str) -> set[str]:
+        return set(self.client.fields_get(model).keys())
+
+    def _existing_fields(self, model: str, fields: list[str]) -> list[str]:
+        available = self._fields(model)
+        return [field for field in fields if field in available]
+
+    def _read_existing(
+        self,
+        model: str,
+        record_ids: list[int],
+        fields: list[str],
+    ) -> list[dict[str, Any]]:
+        return self.client.read(model, record_ids, self._existing_fields(model, fields))
+
+    def _search_read_existing(
+        self,
+        model: str,
+        domain: list[Any],
+        fields: list[str],
+        limit: int | None = None,
+        order: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.client.search_read(
+            model,
+            domain,
+            self._existing_fields(model, fields),
+            limit=limit,
+            order=order,
+            context=context,
+        )
+
+    def _many2one_id(self, value: Any) -> int | None:
+        if isinstance(value, list) and value:
+            return int(value[0])
+        if isinstance(value, int):
+            return value
+        return None
+
+    def _find_by_id_or_name(
+        self,
+        model: str,
+        record_id: int | None,
+        name: str | None,
+        label: str,
+    ) -> int:
+        if record_id is not None:
+            return record_id
+        if not name:
+            raise ValueError(f"Provide either {label}_id or {label}_name/reference.")
+        ids = self.client.search(model, [["name", "=", name]], limit=1)
+        if not ids:
+            ids = self.client.search(model, [["name", "ilike", name]], limit=1)
+        if not ids:
+            raise OdooRPCError(f"{label.title()} '{name}' was not found.")
+        return ids[0]
+
     def get_order(self, order_id: int, include_lines: bool = True) -> dict[str, Any]:
         self._ensure_model("pos.order")
         fields = [
@@ -291,13 +357,23 @@ class OdooToolExecutor:
     def process_refund(self, order_id: int, amount: float, reason: str = "") -> dict[str, Any]:
         self._ensure_model("pos.order")
         order = self.get_order(order_id, include_lines=False)
-        refund_result = self.client.execute_kw("pos.order", "refund", [[order_id]], {"reason": reason})
+        original_total = float(order.get("amount_total") or 0.0)
+        if amount > abs(original_total):
+            return {
+                "status": "blocked",
+                "reason": "refund_amount_exceeds_original_total",
+                "original_order_id": order_id,
+                "requested_amount": amount,
+                "original_total": original_total,
+            }
+        refund_result = self.client.execute_kw("pos.order", "refund", [[order_id]])
         self._post_message("pos.order", order_id, f"Refund requested: {amount}. Reason: {reason or 'n/a'}")
         return {
+            "status": "refund_created",
             "original_order_id": order_id,
             "refund_result": refund_result,
             "requested_amount": amount,
-            "original_total": order.get("amount_total"),
+            "original_total": original_total,
             "reason": reason,
         }
 
@@ -474,24 +550,79 @@ class OdooToolExecutor:
         }
 
     def check_stock(self, product_id: int, location_id: int | None = None) -> dict[str, Any]:
+        """Return on-hand / reserved / available stock for a product.
+
+        - Only `stock.location.usage = 'internal'` locations are counted.
+          Virtual locations (vendors, customers, inventory adjustment,
+          production, transit) are explicitly excluded; they represent
+          double-entry bookkeeping, not physical stock.
+        - When `location_id` is given, the response is limited to that
+          single internal location. Passing a non-internal location id
+          raises an error to prevent stock figures from being polluted by
+          virtual quants.
+        - When `location_id` is omitted, all internal locations across
+          warehouses are aggregated; per-store figures are returned in
+          `by_location` so multi-store callers can reason about each
+          warehouse independently.
+        """
         self._ensure_model("stock.quant")
-        domain: list[Any] = [["product_id", "=", product_id]]
+
         if location_id is not None:
-            domain.append(["location_id", "=", location_id])
+            loc = self.client.read(
+                "stock.location", [location_id], ["usage", "complete_name"]
+            )
+            if not loc or loc[0].get("usage") != "internal":
+                raise OdooRPCError(
+                    f"Location {location_id} is not an internal stock location; "
+                    "check_stock only operates on internal warehouse locations."
+                )
+            domain: list[Any] = [
+                ["product_id", "=", product_id],
+                ["location_id", "=", location_id],
+            ]
+        else:
+            internal_ids = self.client.search(
+                "stock.location", [["usage", "=", "internal"]]
+            )
+            if not internal_ids:
+                raise OdooRPCError("No internal stock locations exist.")
+            domain = [
+                ["product_id", "=", product_id],
+                ["location_id", "in", internal_ids],
+            ]
+
         quants = self.client.search_read(
             "stock.quant",
             domain,
-            ["product_id", "location_id", "quantity", "reserved_quantity"],
+            ["location_id", "quantity", "reserved_quantity"],
         )
-        on_hand = sum(float(quant.get("quantity") or 0.0) for quant in quants)
-        reserved = sum(float(quant.get("reserved_quantity") or 0.0) for quant in quants)
+
+        by_location: dict[int, dict[str, Any]] = {}
+        for q in quants:
+            loc_field = q.get("location_id") or [None, None]
+            loc_id = loc_field[0] if isinstance(loc_field, list) else loc_field
+            loc_name = loc_field[1] if isinstance(loc_field, list) and len(loc_field) > 1 else None
+            bucket = by_location.setdefault(loc_id, {
+                "location_id": loc_id,
+                "location_name": loc_name,
+                "on_hand": 0.0,
+                "reserved": 0.0,
+            })
+            bucket["on_hand"] += float(q.get("quantity") or 0.0)
+            bucket["reserved"] += float(q.get("reserved_quantity") or 0.0)
+        for bucket in by_location.values():
+            bucket["available"] = bucket["on_hand"] - bucket["reserved"]
+
+        total_on_hand = sum(b["on_hand"] for b in by_location.values())
+        total_reserved = sum(b["reserved"] for b in by_location.values())
+
         return {
             "product_id": product_id,
             "location_id": location_id,
-            "on_hand": on_hand,
-            "reserved": reserved,
-            "available": on_hand - reserved,
-            "quants": quants,
+            "on_hand": total_on_hand,
+            "reserved": total_reserved,
+            "available": total_on_hand - total_reserved,
+            "by_location": list(by_location.values()),
         }
 
     def update_inventory(self, product_id: int, quantity: float, location_id: int | None = None) -> dict[str, Any]:
@@ -725,10 +856,22 @@ class OdooToolExecutor:
 
     def get_employee_info(self, employee_id: int) -> dict[str, Any]:
         self._ensure_model("hr.employee")
+        fields = [
+            "name",
+            "work_email",
+            "work_phone",
+            "department_id",
+            "parent_id",
+            "job_title",
+            "company_id",
+            "user_id",
+            "notes",
+            "first_contract_date",
+        ]
         rows = self.client.read(
             "hr.employee",
             [employee_id],
-            ["name", "work_email", "work_phone", "department_id", "parent_id", "job_title", "company_id", "user_id"],
+            self._existing_fields("hr.employee", fields),
         )
         if not rows:
             raise OdooRPCError(f"Employee {employee_id} was not found.")
@@ -743,6 +886,8 @@ class OdooToolExecutor:
             "job_title": row.get("job_title"),
             "company": self._normalize_many2one(row.get("company_id")),
             "user": self._normalize_many2one(row.get("user_id")),
+            "notes": row.get("notes"),
+            "contract_start_date": row.get("first_contract_date"),
         }
 
     def create_ticket(
@@ -754,12 +899,12 @@ class OdooToolExecutor:
         assignee_id: int | None = None,
     ) -> dict[str, Any]:
         model = self._helpdesk_model()
+        fields = self.client.fields_get(model)
         payload: dict[str, Any] = {
             "name": title,
             "description": description,
-            "priority": priority,
+            "priority": self._coerce_selection_value(fields, "priority", priority),
         }
-        fields = self.client.fields_get(model)
         if partner_id is not None and "partner_id" in fields:
             payload["partner_id"] = partner_id
         if model == "helpdesk.ticket":
@@ -825,10 +970,11 @@ class OdooToolExecutor:
         model = self._helpdesk_model()
         row = self.client.read(model, [ticket_id], ["priority"])[0]
         current_priority = row.get("priority") or "1"
-        values: dict[str, Any] = {
-            "priority": priority or str(min(int(current_priority or "1") + 1, 3)),
-        }
         fields = self.client.fields_get(model)
+        next_priority = priority or str(min(int(current_priority or "1") + 1, 3))
+        values: dict[str, Any] = {
+            "priority": self._coerce_selection_value(fields, "priority", next_priority),
+        }
         if team_id is not None:
             if model == "helpdesk.ticket" and "team_id" in fields:
                 values["team_id"] = team_id
@@ -842,14 +988,32 @@ class OdooToolExecutor:
         if "project_id" in fields:
             read_fields.append("project_id")
         updated = self.client.read(model, [ticket_id], read_fields)[0]
-        return {
+        actual_priority = updated.get("priority")
+        result: dict[str, Any] = {
             "ticket_id": ticket_id,
             "model": model,
             "name": updated.get("name"),
-            "priority": updated.get("priority"),
+            "priority": actual_priority,
             "team": self._normalize_many2one(updated.get("team_id") or updated.get("project_id")),
             "reason": reason,
         }
+        if str(actual_priority) != str(next_priority):
+            result["priority_note"] = (
+                f"Priority could not be set to {next_priority}; "
+                f"system maximum supported level is {actual_priority}. "
+                f"Priority remains unchanged."
+            )
+        return result
+
+    def _coerce_selection_value(self, fields: dict[str, Any], field_name: str, value: str) -> str:
+        selection = fields.get(field_name, {}).get("selection") or []
+        allowed = [str(option[0]) for option in selection if option]
+        if not allowed or str(value) in allowed:
+            return str(value)
+        numeric_allowed = [item for item in allowed if item.isdigit()]
+        if str(value).isdigit() and numeric_allowed:
+            return max((item for item in numeric_allowed if int(item) <= int(value)), default=min(numeric_allowed, key=int), key=int)
+        return allowed[0]
 
     def get_open_tickets(self, limit: int = 20, assignee_id: int | None = None) -> dict[str, Any]:
         model = self._helpdesk_model()
@@ -885,8 +1049,15 @@ class OdooToolExecutor:
         self,
         customer_name: str | None = None,
         customer_id: int | None = None,
+        product_id: int | None = None,
         product_name: str | None = None,
         state: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        date_before: str | None = None,
+        amount_min: float | None = None,
+        amount_max: float | None = None,
+        note_contains: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         """Search for sales orders with various filters."""
@@ -900,24 +1071,41 @@ class OdooToolExecutor:
 
         if state:
             domain.append(["state", "=", state])
+        if date_from:
+            domain.append(["date_order", ">=", date_from])
+        if date_to:
+            domain.append(["date_order", "<=", date_to])
+        if date_before:
+            domain.append(["date_order", "<", date_before])
+        if amount_min is not None:
+            domain.append(["amount_total", ">=", amount_min])
+        if amount_max is not None:
+            domain.append(["amount_total", "<=", amount_max])
+        if note_contains:
+            domain.append(["note", "ilike", note_contains])
 
         orders = self.client.search_read(
             "sale.order",
             domain,
-            ["name", "partner_id", "state", "amount_total", "date_order", "order_line"],
+            ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "note"],
             limit=limit,
             order="date_order desc",
         )
 
-        # If product_name filter, check order lines
-        if product_name:
+        # If product filter is present, check order lines.
+        if product_name or product_id is not None:
             filtered_orders = []
             for order in orders:
                 line_ids = order.get("order_line", [])
                 if line_ids:
+                    line_domain: list[Any] = [["id", "in", line_ids]]
+                    if product_id is not None:
+                        line_domain.append(["product_id", "=", product_id])
+                    if product_name:
+                        line_domain.append(["product_id.name", "ilike", product_name])
                     lines = self.client.search_read(
                         "sale.order.line",
-                        [["id", "in", line_ids], ["product_id.name", "ilike", product_name]],
+                        line_domain,
                         ["product_id", "product_uom_qty", "price_unit"],
                     )
                     if lines:
@@ -942,6 +1130,7 @@ class OdooToolExecutor:
                     "state": order.get("state"),
                     "amount_total": order.get("amount_total"),
                     "date_order": order.get("date_order"),
+                    "note": order.get("note"),
                     "matching_lines": order.get("matching_lines", []),
                 }
                 for order in orders
@@ -1016,6 +1205,47 @@ class OdooToolExecutor:
             "state": updated[0].get("state") if updated else None,
             "success": True,
             "message": "Order confirmed successfully.",
+        }
+
+    def cancel_sale_order(self, order_id: int, reason: str) -> dict[str, Any]:
+        """Cancel a sale order via action_cancel and log the reason on the chatter."""
+        self._ensure_model("sale.order")
+        if not reason or not reason.strip():
+            raise ValueError("reason is required when cancelling a sale order.")
+        order = self.client.read("sale.order", [order_id], ["name", "state"])
+        if not order:
+            raise OdooRPCError(f"Sale order {order_id} was not found.")
+        prior_state = order[0].get("state")
+        if prior_state == "cancel":
+            return {
+                "order_id": order_id,
+                "name": order[0].get("name"),
+                "state": "cancel",
+                "success": False,
+                "message": "Order is already cancelled.",
+                "reason": reason,
+            }
+        try:
+            self.client.execute_kw("sale.order", "action_cancel", [[order_id]])
+        except OdooRPCError as exc:
+            return {
+                "order_id": order_id,
+                "name": order[0].get("name"),
+                "state": prior_state,
+                "success": False,
+                "message": f"Odoo refused to cancel: {exc}",
+                "reason": reason,
+            }
+        self._post_message("sale.order", order_id, f"Order cancelled. Reason: {reason}")
+        updated = self.client.read("sale.order", [order_id], ["name", "state"])
+        return {
+            "order_id": order_id,
+            "name": updated[0].get("name") if updated else None,
+            "state": updated[0].get("state") if updated else None,
+            "prior_state": prior_state,
+            "success": True,
+            "message": "Order cancelled successfully.",
+            "reason": reason,
         }
 
     def create_sale_order(
@@ -1238,27 +1468,49 @@ class OdooToolExecutor:
     def search_invoices(
         self,
         customer_id: int | None = None,
+        invoice_number: str | None = None,
+        move_type: str = "out_invoice",
         state: str | None = None,
+        payment_state: str | None = None,
         overdue_only: bool = False,
+        invoice_date_from: str | None = None,
+        invoice_date_to: str | None = None,
+        due_date_before: str | None = None,
+        origin: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
         """Search for invoices with various filters."""
         self._ensure_model("account.move")
-        domain: list[Any] = [["move_type", "=", "out_invoice"]]
+        domain: list[Any] = []
+
+        if move_type:
+            domain.append(["move_type", "=", move_type])
 
         if customer_id is not None:
             domain.append(["partner_id", "=", customer_id])
+        if invoice_number:
+            domain.append(["name", "ilike", invoice_number])
         if state:
             domain.append(["state", "=", state])
+        if payment_state:
+            domain.append(["payment_state", "=", payment_state])
+        if invoice_date_from:
+            domain.append(["invoice_date", ">=", invoice_date_from])
+        if invoice_date_to:
+            domain.append(["invoice_date", "<=", invoice_date_to])
+        if due_date_before:
+            domain.append(["invoice_date_due", "<", due_date_before])
+        if origin:
+            domain.append(["invoice_origin", "ilike", origin])
         if overdue_only:
-            domain.append(["invoice_date_due", "<", datetime.now().strftime("%Y-%m-%d")])
+            domain.append(["invoice_date_due", "<", benchmark_today().isoformat()])
             domain.append(["payment_state", "!=", "paid"])
 
         invoices = self.client.search_read(
             "account.move",
             domain,
             ["name", "partner_id", "state", "amount_total", "amount_residual",
-             "invoice_date", "invoice_date_due", "payment_state"],
+             "invoice_date", "invoice_date_due", "payment_state", "move_type", "invoice_origin"],
             limit=limit,
             order="invoice_date_due asc",
         )
@@ -1276,6 +1528,8 @@ class OdooToolExecutor:
                     "invoice_date": inv.get("invoice_date"),
                     "invoice_date_due": inv.get("invoice_date_due"),
                     "payment_state": inv.get("payment_state"),
+                    "move_type": inv.get("move_type"),
+                    "invoice_origin": inv.get("invoice_origin"),
                 }
                 for inv in invoices
             ],
@@ -1322,3 +1576,993 @@ class OdooToolExecutor:
                 for lead in leads
             ],
         }
+
+    # =========================================================================
+    # EXPANDED BENCHMARK TOOLS
+    # =========================================================================
+
+    def update_sale_order_discount(
+        self,
+        order_id: int,
+        discount_percent: float,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        self._ensure_model("sale.order")
+        if discount_percent < 0 or discount_percent > 100:
+            raise ValueError("discount_percent must be between 0 and 100.")
+        order = self.client.read("sale.order", [order_id], ["name", "state", "order_line"])
+        if not order:
+            raise OdooRPCError(f"Sale order {order_id} was not found.")
+        line_ids = order[0].get("order_line", [])
+        if line_ids:
+            self.client.write("sale.order.line", line_ids, {"discount": discount_percent})
+        if reason:
+            self._post_message("sale.order", order_id, f"Discount applied: {discount_percent}%. Reason: {reason}")
+        return {
+            "order_id": order_id,
+            "name": order[0].get("name"),
+            "state": order[0].get("state"),
+            "updated_lines": line_ids,
+            "discount_percent": discount_percent,
+            "reason": reason,
+        }
+
+    def create_delivery_backorder(
+        self,
+        order_id: int,
+        product_id: int,
+        deliver_quantity: float,
+        backorder_quantity: float,
+        note: str = "",
+    ) -> dict[str, Any]:
+        self._ensure_model("sale.order")
+        pickings = self.client.search_read(
+            "stock.picking",
+            [["sale_id", "=", order_id], ["state", "not in", ["done", "cancel"]]],
+            self._existing_fields("stock.picking", ["name", "state", "move_ids", "move_ids_without_package"]),
+            limit=1,
+        )
+        if not pickings:
+            self._post_message(
+                "sale.order",
+                order_id,
+                f"Partial delivery requested for product {product_id}: deliver {deliver_quantity}, backorder {backorder_quantity}. {note}",
+            )
+            return {
+                "order_id": order_id,
+                "product_id": product_id,
+                "deliver_quantity": deliver_quantity,
+                "backorder_quantity": backorder_quantity,
+                "delivery_created": False,
+                "message": "No open delivery picking was found; note logged on sale order.",
+            }
+        picking = pickings[0]
+        move_ids = picking.get("move_ids_without_package") or picking.get("move_ids") or []
+        matching_moves = self.client.search_read(
+            "stock.move",
+            [["id", "in", move_ids], ["product_id", "=", product_id]],
+            self._existing_fields("stock.move", ["name", "product_id", "product_uom_qty", "quantity_done"]),
+        )
+        for move in matching_moves:
+            fields = self._fields("stock.move")
+            values: dict[str, Any] = {}
+            if "quantity_done" in fields:
+                values["quantity_done"] = deliver_quantity
+            if values:
+                self.client.write("stock.move", [move["id"]], values)
+        self._post_message(
+            "stock.picking",
+            picking["id"],
+            f"Partial delivery: product {product_id}, deliver {deliver_quantity}, backorder {backorder_quantity}. {note}",
+        )
+        return {
+            "order_id": order_id,
+            "picking_id": picking["id"],
+            "picking_name": picking.get("name"),
+            "product_id": product_id,
+            "deliver_quantity": deliver_quantity,
+            "backorder_quantity": backorder_quantity,
+            "matching_moves": matching_moves,
+        }
+
+    def search_stock_locations(
+        self,
+        name: str | None = None,
+        complete_name: str | None = None,
+        usage: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("stock.location")
+        domain: list[Any] = []
+        if name:
+            domain.append(["name", "ilike", name])
+        if complete_name:
+            domain.append(["complete_name", "ilike", complete_name])
+        if usage:
+            domain.append(["usage", "=", usage])
+        rows = self._search_read_existing("stock.location", domain, ["name", "complete_name", "usage"], limit=limit)
+        return {"count": len(rows), "locations": rows}
+
+    def search_reorder_rules(
+        self,
+        product_id: int,
+        location_id: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("stock.warehouse.orderpoint")
+        domain: list[Any] = [["product_id", "=", product_id]]
+        if location_id is not None:
+            domain.append(["location_id", "=", location_id])
+        rows = self._search_read_existing(
+            "stock.warehouse.orderpoint",
+            domain,
+            ["name", "product_id", "location_id", "product_min_qty", "product_max_qty", "qty_to_order"],
+            limit=limit,
+        )
+        return {"count": len(rows), "reorder_rules": rows}
+
+    def apply_inventory_adjustment(
+        self,
+        product_id: int,
+        quantity: float,
+        reason: str,
+        location_id: int | None = None,
+    ) -> dict[str, Any]:
+        result = self.update_inventory(product_id=product_id, quantity=quantity, location_id=location_id)
+        product = self.client.read("product.product", [product_id], ["product_tmpl_id"])
+        template_id = self._many2one_id(product[0].get("product_tmpl_id")) if product else None
+        if template_id is not None:
+            self._post_message("product.template", template_id, f"Inventory adjusted to {quantity}. Reason: {reason}")
+        result["reason"] = reason
+        return result
+
+    def get_invoice(self, invoice_id: int | None = None, invoice_number: str | None = None) -> dict[str, Any]:
+        self._ensure_model("account.move")
+        move_id = self._find_by_id_or_name("account.move", invoice_id, invoice_number, "invoice")
+        moves = self._read_existing(
+            "account.move",
+            [move_id],
+            [
+                "name",
+                "partner_id",
+                "move_type",
+                "state",
+                "payment_state",
+                "amount_total",
+                "amount_residual",
+                "invoice_date",
+                "invoice_date_due",
+                "invoice_origin",
+                "invoice_line_ids",
+            ],
+        )
+        if not moves:
+            raise OdooRPCError(f"Invoice {move_id} was not found.")
+        move = moves[0]
+        line_ids = move.get("invoice_line_ids", [])
+        lines = self._read_existing(
+            "account.move.line",
+            line_ids,
+            ["product_id", "name", "quantity", "price_unit", "price_subtotal", "price_total"],
+        ) if line_ids else []
+        return {**move, "id": move_id, "partner": self._normalize_many2one(move.get("partner_id")), "lines": lines}
+
+    def create_credit_note(
+        self,
+        invoice_id: int,
+        amount: float,
+        reason: str,
+        product_id: int | None = None,
+        quantity: float | None = None,
+    ) -> dict[str, Any]:
+        invoice = self.get_invoice(invoice_id=invoice_id)
+        partner_id = self._many2one_id(invoice.get("partner_id"))
+        if partner_id is None:
+            raise OdooRPCError(f"Invoice {invoice_id} has no partner.")
+        qty = quantity or 1.0
+        line: dict[str, Any] = {"name": reason, "quantity": qty, "price_unit": amount / qty}
+        if product_id is not None:
+            line["product_id"] = product_id
+        values: dict[str, Any] = {
+            "move_type": "out_refund",
+            "partner_id": partner_id,
+            "invoice_origin": invoice.get("name"),
+            "invoice_line_ids": [[0, 0, line]],
+            "ref": f"Credit for {invoice.get('name')}: {reason}",
+        }
+        credit_id = self.client.create("account.move", values)
+        self._post_message("account.move", credit_id, f"Credit note created for invoice {invoice.get('name')}: {reason}")
+        return self.get_invoice(invoice_id=credit_id)
+
+    def reconcile_payment(
+        self,
+        customer_id: int,
+        allocations: list[dict[str, Any]],
+        payment_reference: str = "",
+    ) -> dict[str, Any]:
+        applied: list[dict[str, Any]] = []
+        for allocation in allocations:
+            invoice_id = int(allocation["invoice_id"])
+            amount = float(allocation["amount"])
+            self._post_message(
+                "account.move",
+                invoice_id,
+                f"Payment allocation recorded: {amount}. Reference: {payment_reference or 'n/a'}",
+            )
+            applied.append({"invoice_id": invoice_id, "amount": amount})
+        return {"customer_id": customer_id, "allocations": applied, "payment_reference": payment_reference}
+
+    def post_invoice(self, invoice_id: int, approval_note: str = "") -> dict[str, Any]:
+        self._ensure_model("account.move")
+        if approval_note:
+            self._post_message("account.move", invoice_id, approval_note)
+        self.client.execute_kw("account.move", "action_post", [[invoice_id]])
+        return self.get_invoice(invoice_id=invoice_id)
+
+    def flag_invoice_for_review(self, invoice_id: int, reason: str) -> dict[str, Any]:
+        self._ensure_model("account.move")
+        self._post_message("account.move", invoice_id, f"Flagged for review: {reason}")
+        return {"invoice_id": invoice_id, "flagged": True, "reason": reason}
+
+    def get_lead(self, lead_id: int) -> dict[str, Any]:
+        self._ensure_model("crm.lead")
+        rows = self._read_existing(
+            "crm.lead",
+            [lead_id],
+            ["name", "type", "contact_name", "partner_id", "email_from", "phone", "stage_id", "user_id", "expected_revenue", "probability", "write_date"],
+        )
+        if not rows:
+            raise OdooRPCError(f"Lead {lead_id} was not found.")
+        row = rows[0]
+        return {
+            **row,
+            "id": lead_id,
+            "partner": self._normalize_many2one(row.get("partner_id")),
+            "stage": self._normalize_many2one(row.get("stage_id")),
+            "user": self._normalize_many2one(row.get("user_id")),
+        }
+
+    def update_lead_assignee(self, lead_id: int, user_id: int, reason: str = "") -> dict[str, Any]:
+        self._ensure_model("crm.lead")
+        self.client.write("crm.lead", [lead_id], {"user_id": user_id})
+        if reason:
+            self._post_message("crm.lead", lead_id, f"Reassigned to user {user_id}. Reason: {reason}")
+        return self.get_lead(lead_id)
+
+    def flag_customer_duplicate(self, duplicate_customer_id: int, primary_customer_id: int, note: str) -> dict[str, Any]:
+        self._ensure_model("res.partner")
+        message = f"Duplicate of customer {primary_customer_id}: {note}"
+        self._post_message("res.partner", duplicate_customer_id, message)
+        rows = self.client.read("res.partner", [duplicate_customer_id], ["comment"])
+        comment = (rows[0].get("comment") if rows else "") or ""
+        self.client.write("res.partner", [duplicate_customer_id], {"comment": f"{comment}\n{message}".strip()})
+        return {"duplicate_customer_id": duplicate_customer_id, "primary_customer_id": primary_customer_id, "note": note}
+
+    def search_users(
+        self,
+        name: str | None = None,
+        team_name: str | None = None,
+        available_only: bool = False,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("res.users")
+        domain: list[Any] = [["active", "=", True]]
+        if name:
+            domain.append(["name", "ilike", name])
+        if team_name and self.client.model_exists("crm.team"):
+            teams = self.client.search("crm.team", [["name", "ilike", team_name]])
+            if teams:
+                domain.append(["sale_team_id", "in", teams])
+        rows = self._search_read_existing("res.users", domain, ["name", "login", "email", "sale_team_id"], limit=limit)
+        if available_only:
+            rows = [row for row in rows if row.get("share") is not True]
+        return {"count": len(rows), "users": rows}
+
+    def search_pos_orders(
+        self,
+        order_name: str | None = None,
+        customer_id: int | None = None,
+        product_id: int | None = None,
+        state: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("pos.order")
+        domain: list[Any] = []
+        if order_name:
+            domain.append(["name", "ilike", order_name])
+        if customer_id is not None:
+            domain.append(["partner_id", "=", customer_id])
+        if state:
+            domain.append(["state", "=", state])
+        if date_from:
+            domain.append(["date_order", ">=", date_from])
+        if date_to:
+            domain.append(["date_order", "<=", date_to])
+        rows = self._search_read_existing(
+            "pos.order",
+            domain,
+            ["name", "partner_id", "state", "date_order", "amount_total", "amount_paid", "lines"],
+            limit=limit,
+            order="date_order desc",
+        )
+        if product_id is not None:
+            filtered = []
+            for row in rows:
+                line_ids = row.get("lines", [])
+                matches = self.client.search_read(
+                    "pos.order.line",
+                    [["id", "in", line_ids], ["product_id", "=", product_id]],
+                    self._existing_fields("pos.order.line", ["product_id", "qty", "price_unit", "price_subtotal_incl"]),
+                ) if line_ids else []
+                if matches:
+                    row["matching_lines"] = matches
+                    filtered.append(row)
+            rows = filtered
+        return {"count": len(rows), "orders": rows}
+
+    def get_pos_session_summary(
+        self,
+        session_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
+        domain: list[Any] = []
+        if session_id is not None:
+            domain.append(["session_id", "=", session_id])
+        if date_from:
+            domain.append(["date_order", ">=", date_from])
+        if date_to:
+            domain.append(["date_order", "<=", date_to])
+        orders = self._search_read_existing("pos.order", domain, ["name", "state", "amount_total", "date_order"], limit=500)
+        gross = sum(float(order.get("amount_total") or 0.0) for order in orders if order.get("state") in {"paid", "done"})
+        refunds = sum(abs(float(order.get("amount_total") or 0.0)) for order in orders if float(order.get("amount_total") or 0.0) < 0)
+        return {"order_count": len(orders), "gross_sales": gross, "refunds": refunds, "net_revenue": gross - refunds, "orders": orders}
+
+    def search_employees(
+        self,
+        name: str | None = None,
+        department: str | None = None,
+        work_email: str | None = None,
+        manager_id: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("hr.employee")
+        domain: list[Any] = []
+        if name:
+            domain.append(["name", "ilike", name])
+        if department:
+            domain.append(["department_id.name", "ilike", department])
+        if work_email:
+            domain.append(["work_email", "ilike", work_email])
+        if manager_id is not None:
+            domain.append(["parent_id", "=", manager_id])
+        rows = self._search_read_existing("hr.employee", domain, ["name", "work_email", "department_id", "parent_id", "user_id", "notes", "first_contract_date"], limit=limit)
+        return {"count": len(rows), "employees": rows}
+
+    def search_leave_requests(
+        self,
+        employee_id: int | None = None,
+        employee_name: str | None = None,
+        state: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("hr.leave")
+        domain: list[Any] = []
+        if employee_id is not None:
+            domain.append(["employee_id", "=", employee_id])
+        if employee_name:
+            domain.append(["employee_id.name", "ilike", employee_name])
+        if state:
+            domain.append(["state", "=", state])
+        if date_from:
+            domain.append(["request_date_to", ">=", date_from])
+        if date_to:
+            domain.append(["request_date_from", "<=", date_to])
+        rows = self._search_read_existing(
+            "hr.leave",
+            domain,
+            ["name", "employee_id", "holiday_status_id", "state", "request_date_from", "request_date_to", "number_of_days"],
+            limit=limit,
+        )
+        return {"count": len(rows), "leave_requests": rows}
+
+    def get_leave_balance(self, employee_id: int, leave_type: str | None = None) -> dict[str, Any]:
+        self._ensure_model("hr.leave.allocation")
+        domain: list[Any] = [["employee_id", "=", employee_id], ["state", "=", "validate"]]
+        if leave_type:
+            domain.append(["holiday_status_id.name", "ilike", leave_type])
+        allocations = self._search_read_existing(
+            "hr.leave.allocation",
+            domain,
+            ["holiday_status_id", "number_of_days", "number_of_days_display"],
+            limit=100,
+        )
+        leaves = self.search_leave_requests(employee_id=employee_id, state="validate", limit=100)["leave_requests"]
+        allocated = sum(float(row.get("number_of_days") or row.get("number_of_days_display") or 0.0) for row in allocations)
+        used = sum(float(row.get("number_of_days") or 0.0) for row in leaves)
+        return {"employee_id": employee_id, "leave_type": leave_type, "allocated_days": allocated, "used_days": used, "remaining_days": allocated - used, "allocations": allocations}
+
+    def search_tickets(
+        self,
+        partner_id: int | None = None,
+        title: str | None = None,
+        state: str | None = None,
+        priority: str | None = None,
+        assignee_id: int | None = None,
+        team_id: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        model = self._helpdesk_model()
+        domain: list[Any] = []
+        fields = self._fields(model)
+        if partner_id is not None and "partner_id" in fields:
+            domain.append(["partner_id", "=", partner_id])
+        if title:
+            domain.append(["name", "ilike", title])
+        if priority and "priority" in fields:
+            domain.append(["priority", "=", priority])
+        if assignee_id is not None and "user_id" in fields:
+            domain.append(["user_id", "=", assignee_id])
+        if team_id is not None and "team_id" in fields:
+            domain.append(["team_id", "=", team_id])
+        if state:
+            stage_field = "stage_id"
+            if stage_field in fields:
+                domain.append([f"{stage_field}.name", "ilike", state])
+        rows = self._search_read_existing(
+            model,
+            domain,
+            [
+                "name",
+                "partner_id",
+                "stage_id",
+                "priority",
+                "user_id",
+                "team_id",
+                "create_date",
+                "write_date",
+                "date_last_stage_update",
+            ],
+            limit=limit,
+        )
+        return {"model": model, "count": len(rows), "tickets": rows}
+
+    def get_ticket(self, ticket_id: int, include_notes: bool = True) -> dict[str, Any]:
+        model = self._helpdesk_model()
+        rows = self._read_existing(
+            model,
+            [ticket_id],
+            [
+                "name",
+                "description",
+                "partner_id",
+                "stage_id",
+                "priority",
+                "user_id",
+                "team_id",
+                "create_date",
+                "write_date",
+                "date_last_stage_update",
+            ],
+        )
+        if not rows:
+            raise OdooRPCError(f"Ticket {ticket_id} was not found in {model}.")
+        result = {**rows[0], "id": ticket_id, "model": model}
+        if include_notes and self.client.model_exists("mail.message"):
+            result["notes"] = self._search_read_existing(
+                "mail.message",
+                [["model", "=", model], ["res_id", "=", ticket_id]],
+                ["date", "subject", "body", "author_id"],
+                limit=50,
+                order="date desc",
+            )
+        return result
+
+    def search_vendors(
+        self,
+        name: str | None = None,
+        email: str | None = None,
+        product_id: int | None = None,
+        preferred_only: bool = False,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("res.partner")
+        vendor_ids: list[int] | None = None
+        if product_id is not None and self.client.model_exists("product.supplierinfo"):
+            supplier_domain: list[Any] = []
+            product = self.client.read("product.product", [product_id], ["product_tmpl_id"])
+            tmpl_id = self._many2one_id(product[0].get("product_tmpl_id")) if product else None
+            if tmpl_id is not None:
+                supplier_domain.append(["product_tmpl_id", "=", tmpl_id])
+            suppliers = self._search_read_existing("product.supplierinfo", supplier_domain, ["partner_id", "sequence"], limit=100, order="sequence asc")
+            if preferred_only and suppliers:
+                best_sequence = suppliers[0].get("sequence")
+                suppliers = [row for row in suppliers if row.get("sequence") == best_sequence]
+            vendor_ids = [self._many2one_id(row.get("partner_id")) for row in suppliers]
+            vendor_ids = [vendor_id for vendor_id in vendor_ids if vendor_id is not None]
+        domain: list[Any] = [["supplier_rank", ">", 0]]
+        if vendor_ids is not None:
+            domain.append(["id", "in", vendor_ids])
+        if name:
+            domain.append(["name", "ilike", name])
+        if email:
+            domain.append(["email", "ilike", email])
+        rows = self._search_read_existing("res.partner", domain, ["name", "email", "phone", "supplier_rank"], limit=limit)
+        return {"count": len(rows), "vendors": rows}
+
+    def get_vendor_pricelist(self, vendor_id: int, product_id: int | None = None) -> dict[str, Any]:
+        self._ensure_model("product.supplierinfo")
+        domain: list[Any] = [["partner_id", "=", vendor_id]]
+        if product_id is not None:
+            product = self.client.read("product.product", [product_id], ["product_tmpl_id"])
+            tmpl_id = self._many2one_id(product[0].get("product_tmpl_id")) if product else None
+            if tmpl_id is not None:
+                domain.append(["product_tmpl_id", "=", tmpl_id])
+        rows = self._search_read_existing(
+            "product.supplierinfo",
+            domain,
+            ["partner_id", "product_tmpl_id", "product_id", "min_qty", "price", "currency_id", "sequence"],
+            limit=100,
+            order="sequence asc",
+        )
+        return {"vendor_id": vendor_id, "product_id": product_id, "prices": rows}
+
+    def search_purchase_orders(
+        self,
+        order_name: str | None = None,
+        vendor_id: int | None = None,
+        product_id: int | None = None,
+        state: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("purchase.order")
+        po_fields = self._fields("purchase.order")
+        domain: list[Any] = []
+        if order_name:
+            domain.append(["name", "ilike", order_name])
+        if vendor_id is not None:
+            domain.append(["partner_id", "=", vendor_id])
+        if state:
+            domain.append(["state", "=", state])
+        if date_from:
+            domain.append(["date_order", ">=", date_from])
+        if date_to:
+            domain.append(["date_order", "<=", date_to])
+        rows = self._search_read_existing(
+            "purchase.order",
+            domain,
+            ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "notes"],
+            limit=limit,
+            order="date_order desc",
+        )
+        if order_name and not rows and "notes" in po_fields:
+            alt_domain: list[Any] = [["notes", "ilike", f"[HA-REF:{order_name}]"]]
+            if vendor_id is not None:
+                alt_domain.append(["partner_id", "=", vendor_id])
+            if state:
+                alt_domain.append(["state", "=", state])
+            if date_from:
+                alt_domain.append(["date_order", ">=", date_from])
+            if date_to:
+                alt_domain.append(["date_order", "<=", date_to])
+            rows = self._search_read_existing(
+                "purchase.order",
+                alt_domain,
+                ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "notes"],
+                limit=limit,
+                order="date_order desc",
+            )
+        if product_id is not None:
+            rows = [
+                row for row in rows
+                if row.get("order_line") and self.client.search("purchase.order.line", [["id", "in", row["order_line"]], ["product_id", "=", product_id]], limit=1)
+            ]
+        return {"count": len(rows), "purchase_orders": rows}
+
+    def get_purchase_order(self, order_id: int | None = None, order_name: str | None = None) -> dict[str, Any]:
+        self._ensure_model("purchase.order")
+        try:
+            po_id = self._find_by_id_or_name("purchase.order", order_id, order_name, "purchase_order")
+        except OdooRPCError:
+            po_fields = self._fields("purchase.order")
+            if not order_name or "notes" not in po_fields:
+                raise
+            ids = self.client.search("purchase.order", [["notes", "ilike", f"[HA-REF:{order_name}]"]], limit=1)
+            if not ids:
+                raise
+            po_id = ids[0]
+        rows = self._read_existing("purchase.order", [po_id], ["name", "partner_id", "state", "amount_total", "date_order", "order_line", "picking_ids", "notes"])
+        if not rows:
+            raise OdooRPCError(f"Purchase order {po_id} was not found.")
+        row = rows[0]
+        lines = self._read_existing("purchase.order.line", row.get("order_line", []), ["product_id", "product_qty", "qty_received", "price_unit", "price_subtotal"]) if row.get("order_line") else []
+        return {**row, "id": po_id, "vendor": self._normalize_many2one(row.get("partner_id")), "lines": lines}
+
+    def create_purchase_order(self, vendor_id: int, lines: list[dict[str, Any]], note: str = "") -> dict[str, Any]:
+        self._ensure_model("purchase.order")
+        if not lines:
+            raise ValueError("At least one purchase order line is required.")
+        order_lines = []
+        for line in lines:
+            values = {"product_id": line["product_id"], "product_qty": line["quantity"]}
+            if line.get("price_unit") is not None:
+                values["price_unit"] = line["price_unit"]
+            order_lines.append([0, 0, values])
+        payload: dict[str, Any] = {"partner_id": vendor_id, "order_line": order_lines}
+        if "notes" in self._fields("purchase.order") and note:
+            payload["notes"] = note
+        po_id = self.client.create("purchase.order", payload)
+        if note:
+            self._post_message("purchase.order", po_id, note)
+        return self.get_purchase_order(order_id=po_id)
+
+    def confirm_purchase_order(self, order_id: int, approval_note: str = "") -> dict[str, Any]:
+        self._ensure_model("purchase.order")
+        if approval_note:
+            self._post_message("purchase.order", order_id, approval_note)
+        self.client.execute_kw("purchase.order", "button_confirm", [[order_id]])
+        return self.get_purchase_order(order_id=order_id)
+
+    def receive_purchase_order(
+        self,
+        order_id: int,
+        receipts: list[dict[str, Any]],
+        create_backorder: bool = True,
+    ) -> dict[str, Any]:
+        self._ensure_model("purchase.order")
+        updated: list[dict[str, Any]] = []
+        for receipt in receipts:
+            product_id = int(receipt["product_id"])
+            quantity = float(receipt["quantity"])
+            location_id = receipt.get("location_id") or self._default_stock_location_id()
+            stock = self.check_stock(product_id, location_id)
+            self.update_inventory(product_id, float(stock.get("on_hand") or 0.0) + quantity, location_id)
+            updated.append({"product_id": product_id, "quantity_received": quantity, "location_id": location_id})
+        self._post_message("purchase.order", order_id, f"Receipt processed: {updated}. create_backorder={create_backorder}")
+        return {"order_id": order_id, "receipts": updated, "create_backorder": create_backorder}
+
+    def create_vendor_return(
+        self,
+        order_id: int,
+        vendor_id: int,
+        product_id: int,
+        quantity: float,
+        reason: str,
+        location_id: int | None = None,
+    ) -> dict[str, Any]:
+        target_location = location_id or self._default_stock_location_id()
+        stock = self.check_stock(product_id, target_location)
+        new_quantity = float(stock.get("on_hand") or 0.0) - quantity
+        if new_quantity < 0:
+            raise ValueError("Return quantity exceeds current on-hand stock at the location.")
+        self.update_inventory(product_id, new_quantity, target_location)
+        self._post_message("purchase.order", order_id, f"Vendor return to {vendor_id}: product {product_id}, qty {quantity}. Reason: {reason}")
+        return {"order_id": order_id, "vendor_id": vendor_id, "product_id": product_id, "quantity": quantity, "location_id": target_location, "reason": reason, "new_on_hand": new_quantity}
+
+    def search_boms(
+        self,
+        product_id: int | None = None,
+        product_name: str | None = None,
+        component_id: int | None = None,
+        active: bool | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("mrp.bom")
+        domain: list[Any] = []
+        if product_id is not None:
+            domain.append(["product_tmpl_id", "=", self._many2one_id(self.client.read("product.product", [product_id], ["product_tmpl_id"])[0].get("product_tmpl_id")) or product_id])
+        if product_name:
+            domain.append(["product_tmpl_id.name", "ilike", product_name])
+        if active is not None:
+            domain.append(["active", "=", active])
+        rows = self._search_read_existing(
+            "mrp.bom",
+            domain,
+            ["product_tmpl_id", "product_id", "code", "active", "bom_line_ids"],
+            limit=limit,
+            context={"active_test": False} if active is not True else None,
+        )
+        if component_id is not None:
+            rows = [row for row in rows if row.get("bom_line_ids") and self.client.search("mrp.bom.line", [["id", "in", row["bom_line_ids"]], ["product_id", "=", component_id]], limit=1)]
+        return {"count": len(rows), "boms": rows}
+
+    def get_bom(self, bom_id: int) -> dict[str, Any]:
+        self._ensure_model("mrp.bom")
+        rows = self._read_existing("mrp.bom", [bom_id], ["product_tmpl_id", "product_id", "code", "active", "bom_line_ids"])
+        if not rows:
+            raise OdooRPCError(f"BOM {bom_id} was not found.")
+        row = rows[0]
+        lines = self._read_existing("mrp.bom.line", row.get("bom_line_ids", []), ["product_id", "product_qty", "product_uom_id"]) if row.get("bom_line_ids") else []
+        return {**row, "id": bom_id, "lines": lines}
+
+    def search_production_orders(
+        self,
+        order_name: str | None = None,
+        product_id: int | None = None,
+        bom_id: int | None = None,
+        state: str | None = None,
+        availability: str | None = None,
+        scheduled_date: str | None = None,
+        scheduled_date_from: str | None = None,
+        scheduled_date_to: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("mrp.production")
+        domain: list[Any] = []
+        if order_name:
+            domain.append(["name", "ilike", order_name])
+        if product_id is not None:
+            domain.append(["product_id", "=", product_id])
+        if bom_id is not None:
+            domain.append(["bom_id", "=", bom_id])
+        if state:
+            domain.append(["state", "=", state])
+        if availability and "reservation_state" in self._fields("mrp.production"):
+            domain.append(["reservation_state", "=", availability])
+        if scheduled_date:
+            date_field = "date_planned_start" if "date_planned_start" in self._fields("mrp.production") else "date_start"
+            domain.append([date_field, ">=", scheduled_date])
+        if scheduled_date_from:
+            date_field = "date_planned_start" if "date_planned_start" in self._fields("mrp.production") else "date_start"
+            domain.append([date_field, ">=", scheduled_date_from])
+        if scheduled_date_to:
+            date_field = "date_planned_start" if "date_planned_start" in self._fields("mrp.production") else "date_start"
+            domain.append([date_field, "<=", scheduled_date_to])
+        rows = self._search_read_existing("mrp.production", domain, ["name", "product_id", "product_qty", "bom_id", "state", "reservation_state", "date_planned_start", "date_start"], limit=limit)
+        return {"count": len(rows), "production_orders": rows}
+
+    def get_production_order(self, order_id: int | None = None, order_name: str | None = None) -> dict[str, Any]:
+        self._ensure_model("mrp.production")
+        mo_id = self._find_by_id_or_name("mrp.production", order_id, order_name, "production_order")
+        rows = self._read_existing("mrp.production", [mo_id], ["name", "product_id", "product_qty", "bom_id", "state", "reservation_state", "date_planned_start", "date_start", "move_raw_ids"])
+        if not rows:
+            raise OdooRPCError(f"Production order {mo_id} was not found.")
+        row = rows[0]
+        components = self._read_existing("stock.move", row.get("move_raw_ids", []), ["product_id", "product_uom_qty", "reserved_availability", "quantity_done", "state"]) if row.get("move_raw_ids") else []
+        return {**row, "id": mo_id, "components": components}
+
+    def create_production_order(
+        self,
+        product_id: int,
+        quantity: float,
+        bom_id: int,
+        scheduled_date: str | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        self._ensure_model("mrp.production")
+        values: dict[str, Any] = {"product_id": product_id, "product_qty": quantity, "bom_id": bom_id}
+        fields = self._fields("mrp.production")
+        if scheduled_date:
+            values["date_planned_start" if "date_planned_start" in fields else "date_start"] = scheduled_date
+        mo_id = self.client.create("mrp.production", values)
+        if note:
+            self._post_message("mrp.production", mo_id, note)
+        return self.get_production_order(order_id=mo_id)
+
+    def start_production_order(self, order_id: int) -> dict[str, Any]:
+        self._ensure_model("mrp.production")
+        for method in ("action_confirm", "button_plan", "button_mark_done"):
+            try:
+                if method == "button_mark_done":
+                    break
+                self.client.execute_kw("mrp.production", method, [[order_id]])
+            except OdooRPCError:
+                continue
+        try:
+            self.client.execute_kw("mrp.production", "button_start", [[order_id]])
+        except OdooRPCError:
+            if "state" in self._fields("mrp.production"):
+                self.client.write("mrp.production", [order_id], {"state": "progress"})
+        return self.get_production_order(order_id=order_id)
+
+    def create_bom_version(
+        self,
+        product_id: int,
+        lines: list[dict[str, Any]],
+        source_bom_id: int | None = None,
+        active: bool = True,
+        note: str = "",
+    ) -> dict[str, Any]:
+        self._ensure_model("mrp.bom")
+        product = self.client.read("product.product", [product_id], ["product_tmpl_id"])
+        tmpl_id = self._many2one_id(product[0].get("product_tmpl_id")) if product else None
+        if tmpl_id is None:
+            raise OdooRPCError(f"Product {product_id} has no product template.")
+        bom_lines = [
+            [0, 0, {"product_id": line["component_product_id"], "product_qty": line["quantity"]}]
+            for line in lines
+        ]
+        values: dict[str, Any] = {"product_tmpl_id": tmpl_id, "product_id": product_id, "bom_line_ids": bom_lines, "active": active}
+        if source_bom_id is not None and "code" in self._fields("mrp.bom"):
+            values["code"] = f"Version from BOM {source_bom_id}"
+        bom_id = self.client.create("mrp.bom", values)
+        if note:
+            self._post_message("mrp.bom", bom_id, note)
+        return self.get_bom(bom_id)
+
+    def archive_bom(self, bom_id: int, reason: str = "") -> dict[str, Any]:
+        self._ensure_model("mrp.bom")
+        self.client.write("mrp.bom", [bom_id], {"active": False})
+        if reason:
+            self._post_message("mrp.bom", bom_id, f"Archived: {reason}")
+        return self.get_bom(bom_id)
+
+    def search_projects(
+        self,
+        name: str | None = None,
+        active: bool | None = None,
+        user_id: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("project.project")
+        domain: list[Any] = []
+        if name:
+            domain.append(["name", "ilike", name])
+        if active is not None:
+            domain.append(["active", "=", active])
+        if user_id is not None and "user_id" in self._fields("project.project"):
+            domain.append(["user_id", "=", user_id])
+        rows = self._search_read_existing(
+            "project.project",
+            domain,
+            ["name", "active", "user_id", "partner_id", "date_start", "date"],
+            limit=limit,
+            context={"active_test": False} if active is not True else None,
+        )
+        return {"count": len(rows), "projects": rows}
+
+    def get_project(self, project_id: int) -> dict[str, Any]:
+        self._ensure_model("project.project")
+        rows = self._read_existing("project.project", [project_id], ["name", "active", "user_id", "partner_id", "date_start", "date", "task_ids", "budget_total", "budget_spent"])
+        if not rows:
+            raise OdooRPCError(f"Project {project_id} was not found.")
+        row = rows[0]
+        task_count = len(row.get("task_ids", []) or [])
+        return {**row, "id": project_id, "task_count": task_count}
+
+    def search_project_tasks(
+        self,
+        task_name: str | None = None,
+        project_id: int | None = None,
+        assignee_id: int | None = None,
+        state: str | None = None,
+        deadline_before: str | None = None,
+        blocked_only: bool = False,
+        parent_task_id: int | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        self._ensure_model("project.task")
+        domain: list[Any] = []
+        fields = self._fields("project.task")
+        if task_name:
+            domain.append(["name", "ilike", task_name])
+        if project_id is not None:
+            domain.append(["project_id", "=", project_id])
+        if assignee_id is not None:
+            domain.append(["user_ids" if "user_ids" in fields else "user_id", "in" if "user_ids" in fields else "=", [assignee_id] if "user_ids" in fields else assignee_id])
+        if state:
+            domain.append(["stage_id.name", "ilike", state])
+        deadline_field = "date_deadline" if "date_deadline" in fields else "planned_date_end"
+        if deadline_before and deadline_field in fields:
+            domain.append([deadline_field, "<", deadline_before])
+        if parent_task_id is not None and "parent_id" in fields:
+            domain.append(["parent_id", "=", parent_task_id])
+        rows = self._search_read_existing("project.task", domain, ["name", "project_id", "stage_id", "user_id", "user_ids", "date_deadline", "parent_id", "child_ids", "depend_on_ids"], limit=limit)
+        if blocked_only:
+            rows = [row for row in rows if row.get("child_ids") or row.get("depend_on_ids")]
+        return {"count": len(rows), "tasks": rows}
+
+    def get_project_task(self, task_id: int) -> dict[str, Any]:
+        self._ensure_model("project.task")
+        rows = self._read_existing("project.task", [task_id], ["name", "description", "project_id", "stage_id", "user_id", "user_ids", "date_deadline", "parent_id", "child_ids", "depend_on_ids", "budget"])
+        if not rows:
+            raise OdooRPCError(f"Project task {task_id} was not found.")
+        row = rows[0]
+        subtasks = self._read_existing("project.task", row.get("child_ids", []), ["name", "stage_id"]) if row.get("child_ids") else []
+        return {**row, "id": task_id, "subtasks": subtasks}
+
+    def create_project_task(
+        self,
+        project_id: int,
+        title: str,
+        description: str = "",
+        user_id: int | None = None,
+        deadline: str | None = None,
+        budget: float | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_model("project.task")
+        fields = self._fields("project.task")
+        values: dict[str, Any] = {"project_id": project_id, "name": title}
+        if description and "description" in fields:
+            values["description"] = description
+        if user_id is not None:
+            if "user_ids" in fields:
+                values["user_ids"] = [[6, 0, [user_id]]]
+            elif "user_id" in fields:
+                values["user_id"] = user_id
+        if deadline and "date_deadline" in fields:
+            values["date_deadline"] = deadline
+        if budget is not None and "budget" in fields:
+            values["budget"] = budget
+        task_id = self.client.create("project.task", values)
+        return self.get_project_task(task_id)
+
+    def reassign_project_task(self, task_id: int, user_id: int, reason: str = "") -> dict[str, Any]:
+        self._ensure_model("project.task")
+        fields = self._fields("project.task")
+        values = {"user_ids": [[6, 0, [user_id]]]} if "user_ids" in fields else {"user_id": user_id}
+        self.client.write("project.task", [task_id], values)
+        if reason:
+            self._post_message("project.task", task_id, f"Task reassigned to user {user_id}. Reason: {reason}")
+        return self.get_project_task(task_id)
+
+    def close_project_task(self, task_id: int, resolution: str = "") -> dict[str, Any]:
+        self._ensure_model("project.task")
+        stage_id = self._closed_stage_id("project.task")
+        if stage_id is not None:
+            self.client.write("project.task", [task_id], {"stage_id": stage_id})
+        if resolution:
+            self._post_message("project.task", task_id, resolution)
+        return self.get_project_task(task_id)
+
+    def get_project_workload(self, project_id: int | None = None, include_leave_status: bool = True) -> dict[str, Any]:
+        self._ensure_model("project.task")
+        domain: list[Any] = []
+        if project_id is not None:
+            domain.append(["project_id", "=", project_id])
+        tasks = self._search_read_existing("project.task", domain, ["user_id", "user_ids", "stage_id"], limit=500)
+        counts: dict[int, int] = {}
+        for task in tasks:
+            user_ids = task.get("user_ids") or []
+            if not user_ids:
+                user_id = self._many2one_id(task.get("user_id"))
+                user_ids = [user_id] if user_id is not None else []
+            for user_id in user_ids:
+                counts[int(user_id)] = counts.get(int(user_id), 0) + 1
+        users = self._read_existing("res.users", list(counts.keys()), ["name", "login", "email"]) if counts else []
+        leave_by_user: dict[int, bool] = {}
+        if include_leave_status and counts and self.client.model_exists("hr.employee") and self.client.model_exists("hr.leave"):
+            today_s = benchmark_today().isoformat()
+            employees = self._search_read_existing(
+                "hr.employee",
+                [["user_id", "in", list(counts.keys())]],
+                ["name", "user_id"],
+                limit=500,
+            )
+            employee_to_user = {
+                employee["id"]: self._many2one_id(employee.get("user_id"))
+                for employee in employees
+                if self._many2one_id(employee.get("user_id")) is not None
+            }
+            if employee_to_user:
+                leaves = self._search_read_existing(
+                    "hr.leave",
+                    [
+                        ["employee_id", "in", list(employee_to_user.keys())],
+                        ["state", "=", "validate"],
+                        ["request_date_from", "<=", today_s],
+                        ["request_date_to", ">=", today_s],
+                    ],
+                    ["employee_id"],
+                    limit=500,
+                )
+                for leave in leaves:
+                    employee_id = self._many2one_id(leave.get("employee_id"))
+                    user_id = employee_to_user.get(employee_id) if employee_id is not None else None
+                    if user_id is not None:
+                        leave_by_user[user_id] = True
+        workload = []
+        for user in users:
+            workload.append({
+                "user_id": user["id"],
+                "name": user.get("name"),
+                "open_task_count": counts.get(user["id"], 0),
+                "on_leave": leave_by_user.get(user["id"], False) if include_leave_status else None,
+            })
+        return {"project_id": project_id, "include_leave_status": include_leave_status, "workload": workload}

@@ -1,0 +1,27 @@
+========== SLIDE 1 — EXPERIMENTAL SETUP ==========
+
+Agent models (5): DeepSeek-Chat, DeepSeek-Reasoner, Gemini-Flash, GPT-4o-mini, Qwen3-8B
+Judge model: Gemini-3.1-pro (uniform across all stages)
+Environment: simulated Odoo ERP; agents act via business tool calls (reads + writes)
+Tasks: ~60 tasks across 10 domains (accounting, CRM, helpdesk, HR, inventory, manufacturing, POS, project, purchase, sales)
+Conditions: independent (single task) and dependent (chained tasks)
+Scale evaluated (5 models): 2,142 action claims | 4,069 factual claims | 2,835 tool actions
+
+Metric framework — two-direction say-do:
+  • claim -> action: say-not-done (over-claim), severity = required-miss / forbidden
+  • action -> claim: did-not-say (silent), severity = covert
+  • facts: fabrication (one-way)
+
+========== SLIDE 2 — RQ1: IS THERE HALLUCI-ACTION? (CROSS-MODEL) ==========
+
+[insert RQ1 table here]
+* Gemini-Flash executed 0 state-changing actions (passive).
+
+Takeaways:
+  • Halluci-action is present in every model — none is gap-free.
+  • Raw over-claim rate is misleading; SEVERITY separates models. DeepSeek over-claims are mostly benign (required-miss 0.2-0.4%); GPT-4o-mini and Qwen over-claim on the task's core required actions (required-miss ~9.5%).
+  • Two failure profiles: strong models = occasional low-stakes say-not-done; weak models = high required-miss AND silent consequential actions (Qwen: 12.9% silent writes, 11 covert).
+  • Gemini-Flash near-zero scores = inaction artifact (0 writes); honest by doing nothing.
+  • Risk ranking: Qwen >> GPT-4o-mini >> DeepSeek-Reasoner ~ DeepSeek-Chat >> Gemini-Flash.
+
+One-line answer: Yes — and the TYPE/SEVERITY of halluci-action, not its raw rate, is the discriminating signal across models.

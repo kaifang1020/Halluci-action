@@ -1,112 +1,207 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # Halluci-Action Experiment Runner
 # =============================================================================
 #
-# This script runs trajectory generation experiments with LLM agents.
+# This script is a reusable wrapper around `python -m research.harness`.
+# Task IDs are discovered dynamically from research.tasks.TASKS, so adding a
+# task to the registry automatically makes it available here.
 #
-# SETUP:
-#   1. Export your API key:
-#      export DEEPSEEK_API_KEY=sk-your-key-here
-#      # OR for other providers:
-#      export OPENAI_API_KEY=sk-your-key-here
-#      export ANTHROPIC_API_KEY=sk-your-key-here
-#      export MOONSHOT_API_KEY=your-key-here  # For Kimi
-#      export DASHSCOPE_API_KEY=your-key-here  # For Qwen
+# Examples:
+#   ./run_experiment.sh list
+#   ./run_experiment.sh S-1
+#   ./run_experiment.sh all
+#   DOMAIN=sales ./run_experiment.sh all
+#   DOMAIN=inventory DIFFICULTY=medium ./run_experiment.sh all
+#   ./run_experiment.sh --no-reset PU-2 deepseek-reasoner
 #
-#   2. Ensure Odoo is running:
-#      docker compose up -d
-#
-# USAGE:
-#   ./run_experiment.sh                    # Run all tasks with default settings
-#   ./run_experiment.sh task1              # Run specific task
-#   ./run_experiment.sh task1 deepseek-reasoner  # Run with reasoning model
-#   ./run_experiment.sh --no-reset task1   # Skip database reset
+# Environment:
+#   AGENT=deepseek|openai|anthropic|claude|kimi|qwen
+#   MODEL=deepseek-chat
+#   KL=KL1|KL2|KL3
+#   MAX_STEPS=15
+#   RUNS=1
+#   DOMAIN=sales|inventory|accounting|crm|pos|hr|helpdesk|purchase|manufacturing|project
+#   DIFFICULTY=easy|medium|hard|comprehensive
+#   PYTHON=python3
 #
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-# Default settings
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
+LOCAL_NO_PROXY="localhost,127.0.0.1,::1"
+export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$LOCAL_NO_PROXY"
+export no_proxy="${no_proxy:+$no_proxy,}$LOCAL_NO_PROXY"
+
+PYTHON="${PYTHON:-python3}"
 AGENT="${AGENT:-deepseek}"
 MODEL="${MODEL:-deepseek-chat}"
 KL="${KL:-KL1}"
 MAX_STEPS="${MAX_STEPS:-15}"
 RUNS="${RUNS:-1}"
+DOMAIN="${DOMAIN:-}"
+DIFFICULTY="${DIFFICULTY:-}"
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Halluci-Action Experiment Runner${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
+usage() {
+    cat <<EOF
+Usage:
+  ./run_experiment.sh list
+  ./run_experiment.sh TASK_ID [MODEL]
+  ./run_experiment.sh all [MODEL]
 
-# Check API key
+Examples:
+  ./run_experiment.sh S-1
+  ./run_experiment.sh PU-2 deepseek-reasoner
+  ./run_experiment.sh --no-reset all
+  DOMAIN=sales ./run_experiment.sh all
+  DOMAIN=inventory DIFFICULTY=medium ./run_experiment.sh all
+
+Options:
+  --no-reset      Do not reset/reseed before running.
+  --help, -h      Show this help.
+
+Environment:
+  AGENT=$AGENT
+  MODEL=$MODEL
+  KL=$KL
+  MAX_STEPS=$MAX_STEPS
+  RUNS=$RUNS
+  DOMAIN=${DOMAIN:-<unset>}
+  DIFFICULTY=${DIFFICULTY:-<unset>}
+  PYTHON=$PYTHON
+EOF
+}
+
+print_header() {
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}Halluci-Action Experiment Runner${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+}
+
 check_api_key() {
-    case $AGENT in
+    case "$AGENT" in
         deepseek)
-            if [ -z "$DEEPSEEK_API_KEY" ]; then
+            if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
                 echo -e "${RED}Error: DEEPSEEK_API_KEY not set${NC}"
-                echo "Run: export DEEPSEEK_API_KEY=sk-your-key-here"
                 exit 1
             fi
-            echo -e "${GREEN}✓ DEEPSEEK_API_KEY is set${NC}"
             ;;
         openai)
-            if [ -z "$OPENAI_API_KEY" ]; then
+            if [ -z "${OPENAI_API_KEY:-}" ]; then
                 echo -e "${RED}Error: OPENAI_API_KEY not set${NC}"
                 exit 1
             fi
-            echo -e "${GREEN}✓ OPENAI_API_KEY is set${NC}"
             ;;
         anthropic|claude)
-            if [ -z "$ANTHROPIC_API_KEY" ]; then
+            if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
                 echo -e "${RED}Error: ANTHROPIC_API_KEY not set${NC}"
                 exit 1
             fi
-            echo -e "${GREEN}✓ ANTHROPIC_API_KEY is set${NC}"
             ;;
         kimi)
-            if [ -z "$MOONSHOT_API_KEY" ]; then
+            if [ -z "${MOONSHOT_API_KEY:-}" ]; then
                 echo -e "${RED}Error: MOONSHOT_API_KEY not set${NC}"
                 exit 1
             fi
-            echo -e "${GREEN}✓ MOONSHOT_API_KEY is set${NC}"
             ;;
         qwen)
-            if [ -z "$DASHSCOPE_API_KEY" ]; then
+            if [ -z "${DASHSCOPE_API_KEY:-}" ]; then
                 echo -e "${RED}Error: DASHSCOPE_API_KEY not set${NC}"
                 exit 1
             fi
-            echo -e "${GREEN}✓ DASHSCOPE_API_KEY is set${NC}"
+            ;;
+        *)
+            echo -e "${RED}Error: unsupported AGENT '$AGENT'${NC}"
+            exit 1
             ;;
     esac
 }
 
-# List available tasks
+task_ids() {
+    DOMAIN="$DOMAIN" DIFFICULTY="$DIFFICULTY" "$PYTHON" - <<'PY'
+import os
+from research.tasks import TASKS
+
+domain = os.environ.get("DOMAIN") or None
+difficulty = os.environ.get("DIFFICULTY") or None
+
+for task_id, task in TASKS.items():
+    if domain and task.get("domain") != domain:
+        continue
+    if difficulty and task.get("difficulty") != difficulty:
+        continue
+    print(task_id)
+PY
+}
+
 list_tasks() {
-    echo -e "${YELLOW}Available tasks:${NC}"
-    echo "  task1 - Process Samsung Galaxy S24 Order"
-    echo "  task2 - Check Dyson Bulk Order Feasibility"
-    echo "  task3 - Process USB-C Cable Return"
-    echo "  task4 - Update USB-C Charger Prices"
-    echo "  task5 - New Customer Order"
-    echo "  task6 - End-of-Day Reconciliation"
+    DOMAIN="$DOMAIN" DIFFICULTY="$DIFFICULTY" "$PYTHON" - <<'PY'
+import os
+from research.tasks import TASKS
+
+domain = os.environ.get("DOMAIN") or None
+difficulty = os.environ.get("DIFFICULTY") or None
+
+rows = []
+for task_id, task in TASKS.items():
+    if domain and task.get("domain") != domain:
+        continue
+    if difficulty and task.get("difficulty") != difficulty:
+        continue
+    rows.append((task_id, task.get("domain", ""), task.get("difficulty", ""), task["name"]))
+
+print(f"Available tasks: {len(rows)}")
+if domain or difficulty:
+    print(f"Filters: domain={domain or '*'}, difficulty={difficulty or '*'}")
+print()
+for task_id, task_domain, task_difficulty, name in rows:
+    print(f"{task_id:6s} {task_domain:15s} {task_difficulty:14s} {name}")
+PY
+}
+
+task_exists() {
+    local task_id="$1"
+    TASK_ID="$task_id" "$PYTHON" - <<'PY'
+import os
+import sys
+from research.tasks import get_task
+
+try:
+    get_task(os.environ["TASK_ID"])
+except ValueError:
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+reset_database() {
+    echo -e "${YELLOW}Resetting database to initial state...${NC}"
+    "$PYTHON" potential_scripts/reset_database.py
+    echo ""
+    echo -e "${YELLOW}Seeding database with benchmark data...${NC}"
+    "$PYTHON" scripts/furnish_database.py
+    echo ""
+    echo -e "${GREEN}Database ready${NC}"
     echo ""
 }
 
-# Run a single task
 run_task() {
-    local task_id=$1
+    local task_id="$1"
+
     echo -e "${YELLOW}Running: $task_id${NC}"
-    echo "Agent: $AGENT | Model: $MODEL | KL: $KL"
+    echo "Agent: $AGENT | Model: $MODEL | KL: $KL | Runs: $RUNS | Max steps: $MAX_STEPS"
     echo ""
 
-    python -m research.harness run \
+    "$PYTHON" -m research.harness run \
         --agent "$AGENT" \
         --model "$MODEL" \
         --task-id "$task_id" \
@@ -115,44 +210,45 @@ run_task() {
         --runs "$RUNS"
 
     echo ""
-    echo -e "${GREEN}✓ Completed: $task_id${NC}"
+    echo -e "${GREEN}Completed: $task_id${NC}"
     echo ""
 }
 
-# Reset database to initial state
-reset_database() {
-    echo -e "${YELLOW}Resetting database to initial state...${NC}"
-    python potential_scripts/reset_database.py
-    echo ""
-    echo -e "${YELLOW}Re-furnishing database with test data...${NC}"
-    python potential_scripts/furnish_database.py
-    echo ""
-    echo -e "${GREEN}✓ Database ready${NC}"
-    echo ""
-}
-
-# Main
-cd "$(dirname "$0")"
-
-# Parse arguments
 NO_RESET=false
-TASK_ID=""
+TARGET=""
 MODEL_ARG=""
 
 for arg in "$@"; do
-    case $arg in
+    case "$arg" in
         --no-reset)
             NO_RESET=true
+            ;;
+        --help|-h)
+            usage
+            exit 0
             ;;
         list|--list|-l)
             list_tasks
             exit 0
             ;;
-        task*)
-            TASK_ID="$arg"
+        all|--all)
+            TARGET="all"
+            ;;
+        -*)
+            echo -e "${RED}Unknown option: $arg${NC}"
+            usage
+            exit 1
             ;;
         *)
-            MODEL_ARG="$arg"
+            if [ -z "$TARGET" ]; then
+                TARGET="$arg"
+            elif [ -z "$MODEL_ARG" ]; then
+                MODEL_ARG="$arg"
+            else
+                echo -e "${RED}Unexpected argument: $arg${NC}"
+                usage
+                exit 1
+            fi
             ;;
     esac
 done
@@ -161,27 +257,48 @@ if [ -n "$MODEL_ARG" ]; then
     MODEL="$MODEL_ARG"
 fi
 
-check_api_key
-
-# Reset database before running (unless --no-reset)
-if [ "$NO_RESET" = false ]; then
-    reset_database
+if [ -z "$TARGET" ]; then
+    usage
+    exit 0
 fi
 
-if [ -z "$TASK_ID" ]; then
-    echo -e "${YELLOW}Running all tasks...${NC}"
+if [ "$TARGET" = "all" ]; then
+    mapfile -t TASKS_TO_RUN < <(task_ids)
+    if [ "${#TASKS_TO_RUN[@]}" -eq 0 ]; then
+        echo -e "${RED}No tasks match DOMAIN='${DOMAIN}' DIFFICULTY='${DIFFICULTY}'${NC}"
+        exit 1
+    fi
+
+    print_header
+    check_api_key
+
+    echo -e "${YELLOW}Running ${#TASKS_TO_RUN[@]} task(s).${NC}"
+    if [ -n "$DOMAIN" ] || [ -n "$DIFFICULTY" ]; then
+        echo "Filters: DOMAIN=${DOMAIN:-*} DIFFICULTY=${DIFFICULTY:-*}"
+    fi
     echo ""
-    for task in task1 task2 task3 task4 task5 task6; do
-        run_task "$task"
-        # Reset between tasks
+
+    for task_id in "${TASKS_TO_RUN[@]}"; do
         if [ "$NO_RESET" = false ]; then
             reset_database
         fi
+        run_task "$task_id"
     done
-    echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}All tasks completed!${NC}"
-    echo -e "${GREEN}Results saved in: research/experiments/runs/${NC}"
-    echo -e "${GREEN}========================================${NC}"
 else
-    run_task "$TASK_ID"
+    if ! task_exists "$TARGET"; then
+        echo -e "${RED}Unknown task ID: $TARGET${NC}"
+        echo ""
+        list_tasks
+        exit 1
+    fi
+
+    print_header
+    check_api_key
+
+    if [ "$NO_RESET" = false ]; then
+        reset_database
+    fi
+    run_task "$TARGET"
 fi
+
+echo -e "${GREEN}Results saved in: research/experiments/runs/${NC}"

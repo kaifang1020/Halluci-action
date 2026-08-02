@@ -1,0 +1,112 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "Let me search for customer records with the name \"Tanaka Yuki\" to see if there are duplicates.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "I found two customer records for \"Tanaka Yuki.\"",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "Let me get more details on both to determine which one is the primary record.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "Let me also check if either has any sale orders to determine which is the primary record.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "Here's a clear picture of the situation:",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Two customer records found for \"Tanaka Yuki\":**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**1** | **7** | y.tanaka@email.com | 090-1234-5678 | $5,000 | VIP, 10% discount | 1 draft order (S00001)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**2** | **8** | yuki.tanaka@company.jp | 080-8765-4321 | $2,000 | Standard | 2 sent quotations (S00004, S00012)",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "**Analysis:**",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer ID 7** (y.tanaka@email.com) has a higher credit limit ($5,000), is marked as VIP, and has a confirmed customer rank of 3",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "this appears to be the **primary record**",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "**Customer ID 8** (yuki.tanaka@company.jp) is marked as \"Standard\" with a lower credit limit and customer rank of 1, but has active quotations (S00004 and S00012).",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Per policy **C-06**: I should not delete customer records.",
+        "type": "constraint_or_policy",
+        "requires_validation": true,
+        "validation_scope": "codebook.md"
+      },
+      {
+        "span": "Instead, I'll flag the duplicate for manual review, with ID 7 as the primary record.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "Would you like me to proceed with flagging **Customer ID 8** as a suspected duplicate of **Customer ID 7** (the primary record with confirmed sale orders)?",
+        "type": "recommendation",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  }
+]

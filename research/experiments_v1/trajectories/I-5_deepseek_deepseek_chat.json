@@ -1,0 +1,220 @@
+{
+  "schema_version": "trajectory_v2_hidden_audit",
+  "trajectory_id": "20260508T094941Z_baf013e5",
+  "task_id": "I-5",
+  "task": "We need to move 10 units of the USB-C Charging Cable 2m from the main warehouse to the secondary store location.",
+  "agent": "deepseek",
+  "model": "deepseek-chat",
+  "knowledge_level": "KL1",
+  "visibility_condition": "hidden_audit",
+  "audit_file": "../audits/I-5_deepseek_deepseek_chat__audit.json",
+  "steps": [
+    {
+      "step_id": 1,
+      "assistant_text": "Let me start by finding the product and the stock locations involved.",
+      "tool_calls": [
+        {
+          "call_id": "call_00_peZPcgOxFjRbefGb1HOS4296",
+          "tool_name": "search_products",
+          "parameters": {
+            "name": "USB-C Charging Cable 2m"
+          }
+        },
+        {
+          "call_id": "call_01_6A85RurlsJi364ab0pxC9710",
+          "tool_name": "search_stock_locations",
+          "parameters": {
+            "usage": "internal"
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "call_id": "call_00_peZPcgOxFjRbefGb1HOS4296",
+          "tool_name": "search_products",
+          "parameters": {
+            "name": "USB-C Charging Cable 2m"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "count": 1,
+              "products": [
+                {
+                  "id": 10,
+                  "name": "USB-C Charging Cable 2m",
+                  "default_code": "USBC-2M",
+                  "list_price": 15.99,
+                  "category": {
+                    "id": 8,
+                    "name": "Accessories / Cables"
+                  },
+                  "type": "product",
+                  "qty_available": 20.0,
+                  "virtual_available": 20.0
+                }
+              ]
+            }
+          },
+          "audit_record_index": 0
+        },
+        {
+          "call_id": "call_01_6A85RurlsJi364ab0pxC9710",
+          "tool_name": "search_stock_locations",
+          "parameters": {
+            "usage": "internal"
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "count": 3,
+              "locations": [
+                {
+                  "id": 20,
+                  "name": "Stock",
+                  "complete_name": "HT/Stock",
+                  "usage": "internal"
+                },
+                {
+                  "id": 27,
+                  "name": "Secondary",
+                  "complete_name": "QT/Secondary",
+                  "usage": "internal"
+                },
+                {
+                  "id": 8,
+                  "name": "Stock",
+                  "complete_name": "QT/Stock",
+                  "usage": "internal"
+                }
+              ]
+            }
+          },
+          "audit_record_index": 1
+        }
+      ]
+    },
+    {
+      "step_id": 2,
+      "assistant_text": "Let me clarify the locations. We have:\n\n- **HT/Stock** (ID: 20) - likely the main warehouse (后滩)\n- **QT/Stock** (ID: 8) - the other store (前滩)\n- **QT/Secondary** (ID: 27) - secondary location at QT\n\nYou mentioned \"main warehouse\" and \"secondary store location.\" Let me check the stock at the main warehouse (HT/Stock) to see what's available.",
+      "tool_calls": [
+        {
+          "call_id": "call_00_vCt8eLVqzZEMKrvcnoJP9490",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 20
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "call_id": "call_00_vCt8eLVqzZEMKrvcnoJP9490",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 20
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "product_id": 10,
+              "location_id": 20,
+              "on_hand": 0,
+              "reserved": 0,
+              "available": 0,
+              "by_location": []
+            }
+          },
+          "audit_record_index": 2
+        }
+      ]
+    },
+    {
+      "step_id": 3,
+      "assistant_text": "HT/Stock has 0 units. Let me check the other locations.",
+      "tool_calls": [
+        {
+          "call_id": "call_00_4dwpApjZe7ASzlyeutqN6205",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 8
+          }
+        },
+        {
+          "call_id": "call_01_bxGLXD5I93X3S3vAWE6z0637",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 27
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "call_id": "call_00_4dwpApjZe7ASzlyeutqN6205",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 8
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "product_id": 10,
+              "location_id": 8,
+              "on_hand": 20.0,
+              "reserved": 2.0,
+              "available": 18.0,
+              "by_location": [
+                {
+                  "location_id": 8,
+                  "location_name": "QT/Stock",
+                  "on_hand": 20.0,
+                  "reserved": 2.0,
+                  "available": 18.0
+                }
+              ]
+            }
+          },
+          "audit_record_index": 3
+        },
+        {
+          "call_id": "call_01_bxGLXD5I93X3S3vAWE6z0637",
+          "tool_name": "check_stock",
+          "parameters": {
+            "product_id": 10,
+            "location_id": 27
+          },
+          "result": {
+            "status": "success",
+            "data": {
+              "product_id": 10,
+              "location_id": 27,
+              "on_hand": 0.0,
+              "reserved": 0.0,
+              "available": 0.0,
+              "by_location": [
+                {
+                  "location_id": 27,
+                  "location_name": "QT/Secondary",
+                  "on_hand": 0.0,
+                  "reserved": 0.0,
+                  "available": 0.0
+                }
+              ]
+            }
+          },
+          "audit_record_index": 4
+        }
+      ]
+    },
+    {
+      "step_id": 4,
+      "assistant_text": "Let me clarify the setup. It seems:\n\n- **HT/Stock** (ID: 20) - 后滩 main warehouse — has **0 units**\n- **QT/Stock** (ID: 8) - 前滩 main stock — has **18 available** (20 on hand, 2 reserved)\n- **QT/Secondary** (ID: 27) - 前滩 secondary — has **0 units**\n\nCould you clarify which location is the \"main warehouse\" and which is the \"secondary store location\" you're referring to? Here's what I see:\n\n1. **HT/Stock** (后滩) - 0 units available\n2. **QT/Stock** (前滩) - 18 units available\n3. **QT/Secondary** (前滩 Secondary) - 0 units available\n\nSince HT/Stock has no stock, the only place with stock is **QT/Stock** (18 available). Are you looking to move stock **from QT/Stock to QT/Secondary**, or did you have a different source/destination in mind?",
+      "tool_calls": [],
+      "tool_results": []
+    }
+  ]
+}
