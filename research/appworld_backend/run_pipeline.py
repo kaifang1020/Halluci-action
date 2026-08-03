@@ -99,6 +99,70 @@ JUDGE_CLIENT_RETRIES = int(os.environ.get("HALLUCI_JUDGE_RETRIES", "4"))
 JUDGE_MAX_TOKENS = int(os.environ.get("HALLUCI_JUDGE_MAX_TOKENS", "65535"))
 
 
+# stage2 judges one claim per LLM call, strictly serially. Cost therefore tracks how much the
+# agent SAID, not what it did: fac291d_1/ds_chat performs 7 actions but ends with a 6.3k-char
+# message in which it works out song ids by hand, and stage 1 splits that into 129 claims (145
+# for the cell, against 6-39 for a typical one). At a few seconds per call that alone exceeds an
+# hour, which is why several small ds_chat cells timed out while 200-action cells finished.
+# Judging them concurrently is a pure throughput change: same prompts, same verdicts, same
+# output order, same api_error fallback -- only the waiting overlaps.
+STAGE2_WORKERS = int(os.environ.get("HALLUCI_STAGE2_WORKERS", "8"))
+
+
+def _patch_stage2_concurrency(mod) -> None:
+    """Replace stage2's serial run_judge with a concurrent one of identical semantics."""
+    if getattr(mod, "_conc_patched", False):
+        return
+    orig_run = getattr(mod, "run_judge", None)
+    if orig_run is None:
+        return
+
+    def run_judge(in_path, *, provider="deepseek", out_path=None, limit=None,
+                  continue_on_error=True):
+        import concurrent.futures as _cf
+        from dataclasses import asdict as _asdict
+
+        template = mod.TEMPLATE_PATH.read_text(encoding="utf-8")
+        guideline = mod.GUIDELINE_PATH.read_text(encoding="utf-8")
+        fewshot = mod.FEWSHOT_PATH.read_text(encoding="utf-8")
+        client, model = mod._resolve_client(provider)
+
+        records = []
+        with Path(in_path).open(encoding="utf-8") as f:
+            for n, line in enumerate(f):
+                if limit is not None and n >= limit:
+                    break
+                records.append(json.loads(line))
+
+        def one(rec):
+            try:
+                return mod.judge_record(rec, client=client, model=model, template=template,
+                                        guideline=guideline, fewshot=fewshot)
+            except Exception as e:  # noqa: BLE001 - mirrors the original's api_error verdict
+                if not continue_on_error:
+                    raise
+                return mod.Verdict(claim_id=rec["claim_id"], verdict="api_error",
+                                   evidence_pointer=None, reason="", error=str(e))
+
+        with _cf.ThreadPoolExecutor(max_workers=STAGE2_WORKERS) as ex:
+            verdicts = list(ex.map(one, records))  # .map preserves input order
+
+        if out_path is not None:
+            out_path = Path(out_path)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with out_path.open("w", encoding="utf-8") as out_file:
+                for v in verdicts:
+                    out_file.write(json.dumps(_asdict(v), ensure_ascii=False) + "\n")
+        counts: dict[str, int] = {}
+        for v in verdicts:
+            counts[v.verdict] = counts.get(v.verdict, 0) + 1
+        print(f"        stage2: {len(verdicts)} claims via {STAGE2_WORKERS} workers  {counts}")
+        return verdicts
+
+    mod.run_judge = run_judge
+    mod._conc_patched = True
+
+
 def _patch_client_timeout(mod) -> None:
     """Give a judge module's client a long timeout and a large output budget.
 
@@ -237,6 +301,7 @@ def main() -> None:
     s2 = _load("s2judge", S2 / "judge.py")
     _patch_client_timeout(s2)
     s2.GUIDELINE_PATH = FIXED_GUIDELINE
+    _patch_stage2_concurrency(s2)
     recs = pp.preprocess_one(stage1, traj, codebook_path=CODEBOOK, routing_version="v2")
     c2a_preproc = RUNS / f"stage2_{task}_{tag}_preproc.jsonl"
     pp.write_jsonl(recs, c2a_preproc)
