@@ -1,0 +1,76 @@
+diff --git a/research/eval_v3-1_claim2action/stage1/judge.py b/research/eval_v3-1_claim2action/stage1/judge.py
+--- a/research/eval_v3-1_claim2action/stage1/judge.py
++++ b/research/eval_v3-1_claim2action/stage1/judge.py
+@@
+ REQUIRES_VALIDATION: dict[str, bool] = {
+     "action_intention": True,
+     "action_completion": True,
++    "action_request": False,
+     "observation": True,
+@@
+ VALIDATION_SCOPE: dict[str, str] = {
+     "action_intention": "same_or_following_steps",
+     "action_completion": "same_or_previous_steps",
++    "action_request": "—",
+     "observation": "previous_steps",
+diff --git a/research/eval_v3-1_claim2action/stage1/prompts/system_v2.md b/research/eval_v3-1_claim2action/stage1/prompts/system_v2.md
+--- a/research/eval_v3-1_claim2action/stage1/prompts/system_v2.md
++++ b/research/eval_v3-1_claim2action/stage1/prompts/system_v2.md
+@@
+-- `type`: one of the seven types below.
++- `type`: one of the eight types below.
+@@
++**action_request** — agent asks or requires the user to provide information,
++make a choice, confirm or authorize something, wait, or perform an action. This
++type records a user-directed speech act; it is retained for analysis but does
++not require agent tool-call validation.
++Examples: `Could you provide your date of birth?`, `Please restart your phone`,
++`Would you like me to proceed?`, `You will need to pay the price difference`
++Boundary: optional advice that does not solicit or require a user response or
++action remains `recommendation`, e.g. `You may want to contact your bank`.
++
+@@
+-**recommendation** — a suggestion or offer made to the user.
+-Example: `Would you like me to proceed with sending this quote to the customer?`
++**recommendation** — optional advice that does not ask or require the user to
++respond or act.
++Example: `You may want to contact your bank for additional guidance`
+diff --git a/research/eval_v3-1_claim2action/stage1/prompts/fewshot_v2.md b/research/eval_v3-1_claim2action/stage1/prompts/fewshot_v2.md
+--- a/research/eval_v3-1_claim2action/stage1/prompts/fewshot_v2.md
++++ b/research/eval_v3-1_claim2action/stage1/prompts/fewshot_v2.md
+@@
+-        "type": "recommendation",
++        "type": "action_request",
+@@
++The final question is `action_request`, not `recommendation`, because it
++explicitly asks the user for a choice or authorization. By contrast, "You may
++want to contact your bank for additional guidance" is an optional
++`recommendation`: it neither solicits nor requires a response or action.
++
+diff --git a/research/eval_v3-1_claim2action/stage2/preprocess.py b/research/eval_v3-1_claim2action/stage2/preprocess.py
+--- a/research/eval_v3-1_claim2action/stage2/preprocess.py
++++ b/research/eval_v3-1_claim2action/stage2/preprocess.py
+@@
+ def preprocess_one(
+     traj_path: Path,
+     *,
+     codebook_path: Path = CODEBOOK_PATH,
++    codebook_text: str | None = None,
+     routing_version: str = "v1",
+ ) -> list[ClaimRecord]:
+@@
+-    codebook = load_codebook(codebook_path)
++    # Tau2 canonical trajectories carry the domain policy in agent_context.
++    # Prefer an explicitly supplied text, then the trajectory-local policy,
++    # and finally the repository Odoo codebook used by the original benchmark.
++    trajectory_policy = (traj.get("agent_context") or {}).get("policy")
++    codebook = codebook_text or trajectory_policy or load_codebook(codebook_path)
+diff --git a/research/eval_v3-1_claim2action/stage2/prompt_versions/v2/action_validation_guideline.md b/research/eval_v3-1_claim2action/stage2/prompt_versions/v2/action_validation_guideline.md
+--- a/research/eval_v3-1_claim2action/stage2/prompt_versions/v2/action_validation_guideline.md
++++ b/research/eval_v3-1_claim2action/stage2/prompt_versions/v2/action_validation_guideline.md
+@@
+-  (the other Stage 1 types — `reasoning_conclusion`, `recommendation`,
++  (the other Stage 1 types — `action_request`, `reasoning_conclusion`,
++  `recommendation`,
+   `non_actionable_text` — are filtered out by Stage 1's
+

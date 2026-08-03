@@ -15,10 +15,17 @@ fact — matching how the Odoo path uses authored ground truth.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
-DEFAULT_TASKS_ROOT = Path("/Users/maokaifang/appworld-root/data/tasks")
+# Prefer the live APPWORLD_ROOT so the same code runs on any machine; the
+# original author's macOS path is kept only as a last-resort fallback.
+DEFAULT_TASKS_ROOT = (
+    Path(os.environ["APPWORLD_ROOT"]) / "data" / "tasks"
+    if os.environ.get("APPWORLD_ROOT")
+    else Path("/Users/maokaifang/appworld-root/data/tasks")
+)
 
 
 def _resolve_placeholders(text: str, public: dict, private: dict) -> str:
