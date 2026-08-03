@@ -128,21 +128,22 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
-| A (baseline) | 100 | 496 / 500 | **474 / 500** (94.8%) | 83 / 100 |
-| B (expansion) | 55 | 275 / 275 | **253 / 275** (92.0%) | 49 / 55 |
-| **total** | **155** | **771 / 775** | **727 / 775** (93.8%) | **132 / 155** |
+| A (baseline) | 100 | 496 / 500 | **481 / 500** (96.2%) | 84 / 100 |
+| B (expansion) | 55 | 275 / 275 | **271 / 275** (98.5%) | 51 / 55 |
+| **total** | **155** | **771 / 775** | **752 / 775** (97.0%) | **135 / 155** |
 
-Judged cells per model, out of 155 tasks: `ds_chat` 134, `ds_reasoner` 143, `qwen8b` 151,
-`gemflash` 151, `gpt4omini` 148. Baseline `qwen8b` and `gemflash` are complete at 100/100.
+Judged cells per model, out of 155 tasks: `ds_chat` 139, `ds_reasoner` 152, `qwen8b` 155,
+`gemflash` 155, `gpt4omini` 151. `qwen8b` and `gemflash` are complete across all 155 tasks.
 
-**132 tasks now have all five models judged** and are ready to analyse as a block; the other 23
+**135 tasks now have all five models judged** and are ready to analyse as a block; the other 20
 are partial and should not be mixed into a cross-model comparison until complete.
 
-The 48 cells still open are the expensive tail. Judge cost tracks a trajectory's tool-call count,
-because the action judge issues roughly two LLM calls per action: the largest remaining cell has
-272 actions and needs ~580 calls, about 70 minutes. They are judged last, ordered by cost, so
-they do not pin workers ahead of the cheap ones — mixing them cost a whole sweep 16 timeouts and
-zero completions before the ordering was fixed.
+The 23 cells still open are the expensive tail, judged last and in cost order. Cost tracks a
+trajectory's tool-call count, since the action judge issues roughly two LLM calls per action:
+the largest remaining cell has 272 actions and needs ~580 calls. Even at a 7200s cap, 31 of 82
+attempts in the last pass timed out, so a final 14400s pass follows. Cells that miss that too
+are structurally beyond the judge's per-cell budget and should be reported as excluded rather
+than given unbounded time.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
 is committed on every progress push, so a collaborator can diff it against their own plan without
