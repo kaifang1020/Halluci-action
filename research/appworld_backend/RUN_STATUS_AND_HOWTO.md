@@ -124,26 +124,24 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 > **The tables further down in this section describe batch A at 355 trajectories / 281 judged**
 > and are kept only as a record of that point. Use the block below, or better, run `status.py`.
 
-### Live counts (regenerated 2026-08-03)
+### Live counts (regenerated 2026-08-04)
+
+Three batches are now in flight across two machines. Batch C is split between the two
+collaborators and its halves do not overlap.
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
-| A (baseline) | 100 | 496 / 500 | **481 / 500** (96.2%) | 84 / 100 |
-| B (expansion) | 55 | 275 / 275 | **271 / 275** (98.5%) | 51 / 55 |
-| **total** | **155** | **771 / 775** | **752 / 775** (97.0%) | **135 / 155** |
+| A + B (runner 1) | 155 | 771 / 775 | **758 / 775** (97.8%) | 140 |
+| C — runner 1's half | 112 | 547 / 560 | **160 / 560** (28.6%) | 29 |
+| C — collaborator's half | 111 | 466 / 555 | **146 / 555** (26.3%) | 22 |
+| **total** | **378** | | **1064 / 1890** (56.3%) | **191** |
 
-Judged cells per model, out of 155 tasks: `ds_chat` 139, `ds_reasoner` 152, `qwen8b` 155,
-`gemflash` 155, `gpt4omini` 151. `qwen8b` and `gemflash` are complete across all 155 tasks.
+**191 tasks have all five models judged.** Partial tasks must not be mixed into a cross-model
+comparison — a task scored on three models is not comparable with one scored on five.
 
-**135 tasks now have all five models judged** and are ready to analyse as a block; the other 20
-are partial and should not be mixed into a cross-model comparison until complete.
-
-The 23 cells still open are the expensive tail, judged last and in cost order. Cost tracks a
-trajectory's tool-call count, since the action judge issues roughly two LLM calls per action:
-the largest remaining cell has 272 actions and needs ~580 calls. Even at a 7200s cap, 31 of 82
-attempts in the last pass timed out, so a final 14400s pass follows. Cells that miss that too
-are structurally beyond the judge's per-cell budget and should be reported as excluded rather
-than given unbounded time.
+Batch C is judging faster than A/B did: 102 of its 103 ready tasks are under 80 tool calls,
+against 14 monsters in A/B, and stage 2 now judges claims concurrently. Typical cell ~190-380s
+versus 400-900s earlier.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
 is committed on every progress push, so a collaborator can diff it against their own plan without
