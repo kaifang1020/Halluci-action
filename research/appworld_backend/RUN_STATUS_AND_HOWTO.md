@@ -124,24 +124,25 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 > **The tables further down in this section describe batch A at 355 trajectories / 281 judged**
 > and are kept only as a record of that point. Use the block below, or better, run `status.py`.
 
-### Live counts (regenerated 2026-08-04)
+### Live counts (regenerated 2026-08-06)
 
-Three batches are now in flight across two machines. Batch C is split between the two
-collaborators and its halves do not overlap.
+Three batches across two machines. The two halves of batch C do not overlap.
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
 | A + B (runner 1) | 155 | 771 / 775 | **758 / 775** (97.8%) | 140 |
-| C — runner 1's half | 112 | 547 / 560 | **160 / 560** (28.6%) | 29 |
+| C — runner 1's half | 112 | 547 / 560 | **547 / 560** (97.7%) | 100 |
 | C — collaborator's half | 111 | 466 / 555 | **146 / 555** (26.3%) | 22 |
-| **total** | **378** | | **1064 / 1890** (56.3%) | **191** |
+| **total** | **378** | | **1451 / 1890** (76.8%) | **262** |
 
-**191 tasks have all five models judged.** Partial tasks must not be mixed into a cross-model
+**262 tasks have all five models judged.** Partial tasks must not be mixed into a cross-model
 comparison — a task scored on three models is not comparable with one scored on five.
 
-Batch C is judging faster than A/B did: 102 of its 103 ready tasks are under 80 tool calls,
-against 14 monsters in A/B, and stage 2 now judges claims concurrently. Typical cell ~190-380s
-versus 400-900s earlier.
+Runner 1's half of batch C is judged out: every cell that has a trajectory has been scored.
+The 13 outstanding cells never produced a trajectory in the first place — 9 hit
+`Error 400 Access denied` from the qwen provider (which had previously completed 100/100, so
+this looks like an account-side change rather than a code fault) and 4 failed because the
+agent emitted tool arguments that were not valid JSON.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
 is committed on every progress push, so a collaborator can diff it against their own plan without
