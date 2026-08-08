@@ -124,25 +124,36 @@ one `(task_id, model)` pair. Stage 1 produces its trajectory; stage 2 judges it.
 > **The tables further down in this section describe batch A at 355 trajectories / 281 judged**
 > and are kept only as a record of that point. Use the block below, or better, run `status.py`.
 
-### Live counts (regenerated 2026-08-06)
+### Live counts (regenerated 2026-08-08)
 
 Three batches across two machines. The two halves of batch C do not overlap.
 
 | batch | tasks | trajectories | judged | all-5-models judged |
 |---|---|---|---|---|
-| A + B (runner 1) | 155 | 771 / 775 | **758 / 775** (97.8%) | 140 |
-| C — runner 1's half | 112 | 547 / 560 | **547 / 560** (97.7%) | 100 |
-| C — collaborator's half | 111 | 466 / 555 | **146 / 555** (26.3%) | 22 |
-| **total** | **378** | | **1451 / 1890** (76.8%) | **262** |
+| A + B (runner 1) | 155 | 771 / 775 | **768 / 775** (99.1%) | 149 |
+| C — runner 1's half | 112 | 557 / 560 | **557 / 560** (99.5%) | 109 |
+| C — collaborator's half | 111 | 466 / 555 | **264 / 555** (47.6%) | 22 |
+| **total** | **378** | | **1589 / 1890** (84.1%) | **280** |
 
-**262 tasks have all five models judged.** Partial tasks must not be mixed into a cross-model
+**280 tasks have all five models judged.** Partial tasks must not be mixed into a cross-model
 comparison — a task scored on three models is not comparable with one scored on five.
 
-Runner 1's half of batch C is judged out: every cell that has a trajectory has been scored.
-The 13 outstanding cells never produced a trajectory in the first place — 9 hit
-`Error 400 Access denied` from the qwen provider (which had previously completed 100/100, so
-this looks like an account-side change rather than a code fault) and 4 failed because the
-agent emitted tool arguments that were not valid JSON.
+Runner 1 is at 1325 of 1335 cells (99.3%). The 10 that remain have known, separate causes and
+are not worth further compute:
+
+- **3 exceed the judge's per-cell budget.** The action judge issues roughly two LLM calls per
+  action, so 229360a_2/gpt4omini (272 actions), 68ee2c9_1/gpt4omini (248) and b0a8eae_1/ds_chat
+  (198) need 400-580 calls each and miss even a 14400s timeout. This is structural, not a fault.
+- **7 never produced a trajectory.** Four are 6c2c621 cells where the agent emitted tool
+  arguments that were not valid JSON — a model failure, not an environment one — and three are
+  isolated provider errors.
+
+Report these as excluded rather than giving them unbounded time.
+
+An earlier qwen outage is resolved: nine cells failed with `Error 400 Access denied` from
+DashScope, which turned out to be an intermittent account-side limit rather than a config
+problem — the same key, base URL, tool schema and max_tokens all succeeded on retest, and a
+re-run of the eight affected tasks produced 8 trajectories with zero refusals.
 
 `tasks/completed_cells.json` carries the exact `(task -> models)` mapping behind these numbers and
 is committed on every progress push, so a collaborator can diff it against their own plan without
