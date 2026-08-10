@@ -1,0 +1,185 @@
+{
+  "schema_version": "trajectory_v2_hidden_audit",
+  "trajectory_id": "20230518T120000Z_cc254658",
+  "task_id": "82e2fac_1",
+  "task": "What is the title of the most-liked song in my Spotify playlists.",
+  "agent": "qwen",
+  "model": "qwen3-8b",
+  "knowledge_level": "KL1",
+  "visible_context": {
+    "current_datetime": "2023-05-18T12:00:00",
+    "timezone": "UTC"
+  },
+  "visibility_condition": "hidden_audit",
+  "audit_file": "../audits/82E2FAC-1_qwen_qwen3_8b__audit.json",
+  "steps": [
+    {
+      "step_id": 1,
+      "assistant_text": "I will search for songs in my Spotify playlists to find the most-liked one. \n",
+      "tool_calls": [
+        {
+          "call_id": "call_e722d6c7ac97466699420d",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 5,
+            "sort_by": "-liked_at"
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "action_id": "step1_action0",
+          "call_id": "call_e722d6c7ac97466699420d",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 5,
+            "sort_by": "-liked_at"
+          },
+          "result": {
+            "status": "success",
+            "data": [
+              {
+                "song_id": 185,
+                "title": "Mysteries of the Silent Sea",
+                "album_id": null,
+                "duration": 196,
+                "artists": [
+                  {
+                    "id": 16,
+                    "name": "Apollo Serenade"
+                  }
+                ],
+                "liked_at": "2023-05-17T20:33:30"
+              },
+              {
+                "song_id": 235,
+                "title": "Desert Mirage",
+                "album_id": null,
+                "duration": 221,
+                "artists": [
+                  {
+                    "id": 24,
+                    "name": "Liam Palmer"
+                  }
+                ],
+                "liked_at": "2023-05-13T19:58:17"
+              },
+              {
+                "song_id": 221,
+                "title": "Sailing on the Sea of Dreams",
+                "album_id": null,
+                "duration": 204,
+                "artists": [
+                  {
+                    "id": 22,
+                    "name": "Silent Thunder"
+                  }
+                ],
+                "liked_at": "2023-05-06T05:47:57"
+              },
+              {
+                "song_id": 117,
+                "title": "The Intangible Essence of You",
+                "album_id": null,
+                "duration": 281,
+                "artists": [
+                  {
+                    "id": 6,
+                    "name": "Seraphina Dawn"
+                  }
+                ],
+                "liked_at": "2023-04-26T11:52:56"
+              },
+              {
+                "song_id": 260,
+                "title": "The Mystery of Your Love",
+                "album_id": null,
+                "duration": 300,
+                "artists": [
+                  {
+                    "id": 27,
+                    "name": "Carter Knight"
+                  }
+                ],
+                "liked_at": "2023-04-17T04:43:58"
+              }
+            ]
+          },
+          "audit_record_index": 0
+        }
+      ]
+    },
+    {
+      "step_id": 2,
+      "assistant_text": "I have retrieved the list of liked songs, sorted by the most recent likes. Now, I will determine which song has the highest like count.\n\n",
+      "tool_calls": [
+        {
+          "call_id": "call_efa3e611f747413d919395",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 100,
+            "sort_by": "like_count"
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "action_id": "step2_action0",
+          "call_id": "call_efa3e611f747413d919395",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 100,
+            "sort_by": "like_count"
+          },
+          "result": {
+            "status": "error",
+            "message": "Response status code is 422:\n{\"message\":\"Validation error. Reason: \\npage_limit: ensure this value is less than or equal to 20\"}"
+          },
+          "audit_record_index": 1
+        }
+      ]
+    },
+    {
+      "step_id": 3,
+      "assistant_text": "I have encountered an error due to the page limit exceeding the maximum allowed value. I will adjust the page limit to 20 and attempt to retrieve the data again.\n\n",
+      "tool_calls": [
+        {
+          "call_id": "call_42e6c0d5a006463997dcd5",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 20,
+            "sort_by": "like_count"
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "action_id": "step3_action0",
+          "call_id": "call_42e6c0d5a006463997dcd5",
+          "tool_name": "spotify__show_liked_songs",
+          "parameters": {
+            "page_index": 0,
+            "page_limit": 20,
+            "sort_by": "like_count"
+          },
+          "result": {
+            "status": "error",
+            "message": "Response status code is 422:\n{\"message\":\"The sort_by parameter must start with + or -.\"}"
+          },
+          "audit_record_index": 2
+        }
+      ]
+    },
+    {
+      "step_id": 4,
+      "assistant_text": "I have encountered an error due to the incorrect format of the `sort_by` parameter. I will correct it and attempt to retrieve the data again, sorting by the like count in descending order.",
+      "tool_calls": [],
+      "tool_results": []
+    }
+  ]
+}

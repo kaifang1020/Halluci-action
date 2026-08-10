@@ -1,0 +1,59 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "I will label all email threads in the Gmail inbox from notifications@<app>.com with the respective app's label, ignoring spam and archived threads.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "I have retrieved the email threads from the Gmail inbox that match the query \"notifications@<app>.com\" and are not spam or archived.",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "I have encountered an error while attempting to retrieve the profile for the email address \"notifications@<app>.com\".",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "The email address is not valid.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "I will try a different approach to determine the appropriate label for each email thread.",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "I will examine the subject lines and participants of each email thread to infer the respective app's label.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "I will then apply the inferred label to each email thread.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  }
+]

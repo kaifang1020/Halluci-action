@@ -1,0 +1,88 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "I will check your Gmail inbox threads to see how priority and read status are represented",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "I have retrieved the first page of inbox threads",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "which show a `label` field (priority-1/2/3) and a `read` flag",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "I will now filter the inbox for threads labeled priority-2 that are read to get the exact count",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "I have retrieved 20 priority-2 read threads so far",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "I need to check for additional pages to get the full count",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "I have confirmed there are no further pages",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "the second page returned empty",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Counting the results from the filtered query gives the final number",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "There are **18 priority-2 read email threads** in your Gmail inbox",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "These include threads such as \"Book Club Reminder,\" \"Monthly Sales Update,\" \"Upcoming Project Deadlines,\" \"Upcoming Team Meeting,\" \"New Employee Onboarding,\" and others, all with the `priority-2` label and `read = true`",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      }
+    ]
+  }
+]

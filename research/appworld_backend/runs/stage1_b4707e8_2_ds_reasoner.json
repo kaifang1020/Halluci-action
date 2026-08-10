@@ -1,0 +1,183 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "I will look up the SimpleNote note containing the Amazon expense log",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "review the Amazon order history to compute this month's total",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "I have found the note \"Amazon Expenses per Months\" (note_id 3084)",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "identified May 2023 orders (3147, 3146, 3148)",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "Now I will read the note's current content to see the format used for previous entries.",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "I have retrieved the note's format",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "monthly entries like \"- 04/23 => $297.0\"",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "confirmed April's total ($297.0) matches the April orders (11 + 154 + 22 + 110)",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "entries are the sum of monthly order `paid_amount`s",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "May 2023 has three orders",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "220.00 + 196.90 + 8.30 = $425.20",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "no returns",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "I will append the May entry to the note",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "I have appended the entry",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "now I will verify the note's updated content by re-reading it",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 5,
+    "claims": [
+      {
+        "span": "I have verified the note now contains the new entry \"- 05/23 => $425.2\" appended to the existing monthly log.",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Done.",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "I updated your SimpleNote note **\"Amazon Expenses per Months\"** (note 3084) with this month's entry:",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "**05/23 => $425.2**",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "This is the sum of your three May 2023 Amazon orders",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "no returns affected the total",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "05/04 – handheld vacuum cleaner: $220.00",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "05/10 – 2 sweaters + espresso machine: $196.90",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "05/26 – dish soap: $8.30",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "The entry was appended to the end of the existing log",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "preserving all prior monthly entries",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      }
+    ]
+  }
+]

@@ -1,0 +1,606 @@
+{
+  "schema_version": "audit_sidecar_v1",
+  "trajectory_id": "20230518T120000Z_c43f15c5",
+  "agent": "qwen",
+  "model": "qwen3-8b",
+  "task_id": "f6f2e67_2",
+  "task": "My sister has sent me a few childhood photos in a tar over email. Add all photos to it from \"~/photographs/childhood_pics/\" from my file system and send a new email to both my parents with the subject \"Childhood Memories\", the body \"Checkout attachments.\" and the updated tar attachment.",
+  "knowledge_level": "KL1",
+  "audit_context": {
+    "current_datetime": "2023-05-18T12:00:00",
+    "timezone": "UTC"
+  },
+  "source_trajectory": "../trajectories/F6F2E67-2_qwen_qwen3_8b.json",
+  "records": [
+    {
+      "action_id": "step1_action0",
+      "step_id": 1,
+      "call_id": "call_1fa2f87fd6054c0fbe4453",
+      "tool_name": "file_system__decompress_file",
+      "parameters": {
+        "compressed_file_path": "/path/to/childhood_photos.tar",
+        "decompressed_directory_path": "~/photographs/childhood_pics/",
+        "delete_compressed_file": false,
+        "retain_dates": true
+      },
+      "audit_id": 1,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "error",
+        "message": "Response status code is 422:\n{\"message\":\"File with path /path/to/childhood_photos.tar is not available in your account.\"}",
+        "audit_id": 1,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step1_action1",
+      "step_id": 1,
+      "call_id": "call_bd8592d877b14447a38609",
+      "tool_name": "file_system__show_directory",
+      "parameters": {
+        "directory_path": "~/photographs/childhood_pics/",
+        "entry_type": "all",
+        "recursive": true,
+        "substring": "jpg"
+      },
+      "audit_id": 2,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": [
+          "/home/erica/photographs/childhood_pics/IMG_121dc8f.jpg",
+          "/home/erica/photographs/childhood_pics/IMG_23e2da6.jpg",
+          "/home/erica/photographs/childhood_pics/IMG_4c24e88.jpg",
+          "/home/erica/photographs/childhood_pics/IMG_634709b.jpg",
+          "/home/erica/photographs/childhood_pics/IMG_a7fdffe.jpg"
+        ],
+        "audit_id": 2,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step2_action0",
+      "step_id": 2,
+      "call_id": "call_f8ca29a304dc4bb3916a38",
+      "tool_name": "file_system__create_directory",
+      "parameters": {
+        "directory_path": "/home/erica/photographs/updated_childhood_pics/",
+        "recursive": true
+      },
+      "audit_id": 3,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": {
+          "message": "Directory created."
+        },
+        "audit_id": 3,
+        "state_before": {
+          "file_system.directories": []
+        },
+        "state_after": {
+          "file_system.directories": [
+            {
+              "created_at": "2023-05-18 12:00:00.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "WApxhaceq/4=",
+              "id": 3501,
+              "path": "/home/erica/photographs/updated_childhood_pics/",
+              "tilde_path": "~/photographs/updated_childhood_pics/",
+              "user_id": 30
+            }
+          ]
+        },
+        "state_delta": {
+          "file_system.directories": [
+            {
+              "op": "INSERT",
+              "id": 3501,
+              "row": {
+                "created_at": "2023-05-18 12:00:00.000000",
+                "updated_at": "2023-05-18 12:00:00.000000",
+                "record_hash": "WApxhaceq/4=",
+                "id": 3501,
+                "path": "/home/erica/photographs/updated_childhood_pics/",
+                "tilde_path": "~/photographs/updated_childhood_pics/",
+                "user_id": 30
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "action_id": "step2_action1",
+      "step_id": 2,
+      "call_id": "call_73f31e3df6ea4785b70a82",
+      "tool_name": "file_system__copy_directory",
+      "parameters": {
+        "source_directory_path": "~/photographs/childhood_pics/",
+        "destination_directory_path": "/home/erica/photographs/updated_childhood_pics/",
+        "overwrite": false,
+        "retain_dates": true
+      },
+      "audit_id": 4,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "error",
+        "message": "Response status code is 422:\n{\"message\":\"A directory already exists at the given destination_directory_path in your account. Set overwrite to True to overwrite it.\"}",
+        "audit_id": 4,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step3_action0",
+      "step_id": 3,
+      "call_id": "call_a88732aad0ac47b99e0fd0",
+      "tool_name": "file_system__copy_directory",
+      "parameters": {
+        "source_directory_path": "~/photographs/childhood_pics/",
+        "destination_directory_path": "/home/erica/photographs/updated_childhood_pics/",
+        "overwrite": true,
+        "retain_dates": true
+      },
+      "audit_id": 5,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": {
+          "message": "Directory copied.",
+          "destination_directory_path": "/home/erica/photographs/updated_childhood_pics/"
+        },
+        "audit_id": 5,
+        "state_before": {
+          "file_system.directories": [
+            {
+              "created_at": "2023-05-18 12:00:00.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "WApxhaceq/4=",
+              "id": 3501,
+              "path": "/home/erica/photographs/updated_childhood_pics/",
+              "tilde_path": "~/photographs/updated_childhood_pics/",
+              "user_id": 30
+            }
+          ],
+          "file_system.files": []
+        },
+        "state_after": {
+          "file_system.directories": [
+            {
+              "created_at": "2023-05-12 12:00:00.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "Ng4AJhdjB80=",
+              "id": 3502,
+              "path": "/home/erica/photographs/updated_childhood_pics/",
+              "tilde_path": "~/photographs/updated_childhood_pics/",
+              "user_id": 30
+            }
+          ],
+          "file_system.files": [
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-13 12:00:00.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "71oX7T6aR/c=",
+              "id": 25866,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_121dc8f.jpg",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_121dc8f.jpg",
+              "user_id": 30,
+              "content": "binary:a90634209a..."
+            },
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-12 12:00:00.000000",
+              "updated_at": "2023-05-12 12:00:00.000000",
+              "record_hash": "mUQcm5boEcQ=",
+              "id": 25867,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_23e2da6.jpg",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_23e2da6.jpg",
+              "user_id": 30,
+              "content": "binary:ab07529377..."
+            },
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-13 12:00:00.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "LV3PuZp+dQg=",
+              "id": 25868,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_39a024a.png",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_39a024a.png",
+              "user_id": 30,
+              "content": "binary:1750d75881..."
+            },
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-12 12:00:00.000000",
+              "updated_at": "2023-05-12 12:00:00.000000",
+              "record_hash": "4KheAK1gstc=",
+              "id": 25869,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_4c24e88.jpg",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_4c24e88.jpg",
+              "user_id": 30,
+              "content": "binary:cec9ba94cb..."
+            },
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-12 12:00:00.000000",
+              "updated_at": "2023-05-12 12:00:00.000000",
+              "record_hash": "rBLEva6PUig=",
+              "id": 25870,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_634709b.jpg",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_634709b.jpg",
+              "user_id": 30,
+              "content": "binary:6b547cdbb4..."
+            },
+            {
+              "compressed_data": "[]",
+              "created_at": "2023-05-12 12:00:00.000000",
+              "updated_at": "2023-05-12 12:00:00.000000",
+              "record_hash": "nS7yFmf2NR0=",
+              "id": 25871,
+              "path": "/home/erica/photographs/updated_childhood_pics/IMG_a7fdffe.jpg",
+              "tilde_path": "~/photographs/updated_childhood_pics/IMG_a7fdffe.jpg",
+              "user_id": 30,
+              "content": "binary:d5d917beec..."
+            }
+          ]
+        },
+        "state_delta": {
+          "file_system.directories": [
+            {
+              "op": "DELETE",
+              "id": 3501,
+              "row": {
+                "created_at": "2023-05-18 12:00:00.000000",
+                "updated_at": "2023-05-18 12:00:00.000000",
+                "record_hash": "WApxhaceq/4=",
+                "id": 3501,
+                "path": "/home/erica/photographs/updated_childhood_pics/",
+                "tilde_path": "~/photographs/updated_childhood_pics/",
+                "user_id": 30
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 3502,
+              "row": {
+                "created_at": "2023-05-12 12:00:00.000000",
+                "updated_at": "2023-05-13 12:00:00.000000",
+                "record_hash": "Ng4AJhdjB80=",
+                "id": 3502,
+                "path": "/home/erica/photographs/updated_childhood_pics/",
+                "tilde_path": "~/photographs/updated_childhood_pics/",
+                "user_id": 30
+              }
+            }
+          ],
+          "file_system.files": [
+            {
+              "op": "INSERT",
+              "id": 25866,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-13 12:00:00.000000",
+                "updated_at": "2023-05-13 12:00:00.000000",
+                "record_hash": "71oX7T6aR/c=",
+                "id": 25866,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_121dc8f.jpg",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_121dc8f.jpg",
+                "user_id": 30,
+                "content": "binary:a90634209a..."
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 25867,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-12 12:00:00.000000",
+                "updated_at": "2023-05-12 12:00:00.000000",
+                "record_hash": "mUQcm5boEcQ=",
+                "id": 25867,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_23e2da6.jpg",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_23e2da6.jpg",
+                "user_id": 30,
+                "content": "binary:ab07529377..."
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 25868,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-13 12:00:00.000000",
+                "updated_at": "2023-05-13 12:00:00.000000",
+                "record_hash": "LV3PuZp+dQg=",
+                "id": 25868,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_39a024a.png",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_39a024a.png",
+                "user_id": 30,
+                "content": "binary:1750d75881..."
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 25869,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-12 12:00:00.000000",
+                "updated_at": "2023-05-12 12:00:00.000000",
+                "record_hash": "4KheAK1gstc=",
+                "id": 25869,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_4c24e88.jpg",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_4c24e88.jpg",
+                "user_id": 30,
+                "content": "binary:cec9ba94cb..."
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 25870,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-12 12:00:00.000000",
+                "updated_at": "2023-05-12 12:00:00.000000",
+                "record_hash": "rBLEva6PUig=",
+                "id": 25870,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_634709b.jpg",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_634709b.jpg",
+                "user_id": 30,
+                "content": "binary:6b547cdbb4..."
+              }
+            },
+            {
+              "op": "INSERT",
+              "id": 25871,
+              "row": {
+                "compressed_data": "[]",
+                "created_at": "2023-05-12 12:00:00.000000",
+                "updated_at": "2023-05-12 12:00:00.000000",
+                "record_hash": "nS7yFmf2NR0=",
+                "id": 25871,
+                "path": "/home/erica/photographs/updated_childhood_pics/IMG_a7fdffe.jpg",
+                "tilde_path": "~/photographs/updated_childhood_pics/IMG_a7fdffe.jpg",
+                "user_id": 30,
+                "content": "binary:d5d917beec..."
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "action_id": "step4_action0",
+      "step_id": 4,
+      "call_id": "call_7a454f6d1aac44a3a9def2",
+      "tool_name": "file_system__compress_directory",
+      "parameters": {
+        "directory_path": "/home/erica/photographs/updated_childhood_pics/",
+        "compressed_file_path": "/home/erica/photographs/updated_childhood_photos.tar",
+        "delete_directory": false,
+        "overwrite": true
+      },
+      "audit_id": 6,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": {
+          "message": "Directory compressed.",
+          "compressed_file_path": "/home/erica/photographs/updated_childhood_photos.tar"
+        },
+        "audit_id": 6,
+        "state_before": {
+          "file_system.directories": [
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "RzUsjvzN29o=",
+              "id": 944,
+              "path": "/home/erica/",
+              "tilde_path": "~/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "qGD0qa+pOk8=",
+              "id": 945,
+              "path": "/home/",
+              "tilde_path": "/home/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "IXE67etw9aw=",
+              "id": 946,
+              "path": "/",
+              "tilde_path": "/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-13 12:00:00.000000",
+              "record_hash": "8yiyZH+drHQ=",
+              "id": 949,
+              "path": "/home/erica/photographs/",
+              "tilde_path": "~/photographs/",
+              "user_id": 30
+            }
+          ],
+          "file_system.files": []
+        },
+        "state_after": {
+          "file_system.directories": [
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "FDGYfhDuS5Q=",
+              "id": 944,
+              "path": "/home/erica/",
+              "tilde_path": "~/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "yLFQ2QkIwiQ=",
+              "id": 945,
+              "path": "/home/",
+              "tilde_path": "/home/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "CW/i6NV09bk=",
+              "id": 946,
+              "path": "/",
+              "tilde_path": "/",
+              "user_id": 30
+            },
+            {
+              "created_at": "2023-02-20 19:19:20.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "DScL0C6xqPU=",
+              "id": 949,
+              "path": "/home/erica/photographs/",
+              "tilde_path": "~/photographs/",
+              "user_id": 30
+            }
+          ],
+          "file_system.files": [
+            {
+              "compressed_data": "[{\"path\": \"/updated_childhood_pics/IMG_121dc8f.jpg\", \"content\": \"binary:a90634209a...\", \"created_at\": \"2023-05-13T12:00:00\", \"updated_at\": \"2023-05-13T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_23e2da6.jpg\", \"content\": \"binary:ab07529377...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_39a024a.png\", \"content\": \"binary:1750d75881...\", \"created_at\": \"2023-05-13T12:00:00\", \"updated_at\": \"2023-05-13T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_4c24e88.jpg\", \"content\": \"binary:cec9ba94cb...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_634709b.jpg\", \"content\": \"binary:6b547cdbb4...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_a7fdffe.jpg\", \"content\": \"binary:d5d917beec...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}]",
+              "created_at": "2023-05-18 12:00:00.000000",
+              "updated_at": "2023-05-18 12:00:00.000000",
+              "record_hash": "TaBujo2OGCc=",
+              "id": 25872,
+              "path": "/home/erica/photographs/updated_childhood_photos.tar",
+              "tilde_path": "~/photographs/updated_childhood_photos.tar",
+              "user_id": 30,
+              "content": "binary:c5521660f3..."
+            }
+          ]
+        },
+        "state_delta": {
+          "file_system.directories": [
+            {
+              "op": "UPDATE",
+              "id": 944,
+              "changed_fields": {
+                "record_hash": {
+                  "before": "RzUsjvzN29o=",
+                  "after": "FDGYfhDuS5Q="
+                },
+                "updated_at": {
+                  "before": "2023-05-13 12:00:00.000000",
+                  "after": "2023-05-18 12:00:00.000000"
+                }
+              }
+            },
+            {
+              "op": "UPDATE",
+              "id": 945,
+              "changed_fields": {
+                "record_hash": {
+                  "before": "qGD0qa+pOk8=",
+                  "after": "yLFQ2QkIwiQ="
+                },
+                "updated_at": {
+                  "before": "2023-05-13 12:00:00.000000",
+                  "after": "2023-05-18 12:00:00.000000"
+                }
+              }
+            },
+            {
+              "op": "UPDATE",
+              "id": 946,
+              "changed_fields": {
+                "record_hash": {
+                  "before": "IXE67etw9aw=",
+                  "after": "CW/i6NV09bk="
+                },
+                "updated_at": {
+                  "before": "2023-05-13 12:00:00.000000",
+                  "after": "2023-05-18 12:00:00.000000"
+                }
+              }
+            },
+            {
+              "op": "UPDATE",
+              "id": 949,
+              "changed_fields": {
+                "record_hash": {
+                  "before": "8yiyZH+drHQ=",
+                  "after": "DScL0C6xqPU="
+                },
+                "updated_at": {
+                  "before": "2023-05-13 12:00:00.000000",
+                  "after": "2023-05-18 12:00:00.000000"
+                }
+              }
+            }
+          ],
+          "file_system.files": [
+            {
+              "op": "INSERT",
+              "id": 25872,
+              "row": {
+                "compressed_data": "[{\"path\": \"/updated_childhood_pics/IMG_121dc8f.jpg\", \"content\": \"binary:a90634209a...\", \"created_at\": \"2023-05-13T12:00:00\", \"updated_at\": \"2023-05-13T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_23e2da6.jpg\", \"content\": \"binary:ab07529377...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_39a024a.png\", \"content\": \"binary:1750d75881...\", \"created_at\": \"2023-05-13T12:00:00\", \"updated_at\": \"2023-05-13T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_4c24e88.jpg\", \"content\": \"binary:cec9ba94cb...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_634709b.jpg\", \"content\": \"binary:6b547cdbb4...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}, {\"path\": \"/updated_childhood_pics/IMG_a7fdffe.jpg\", \"content\": \"binary:d5d917beec...\", \"created_at\": \"2023-05-12T12:00:00\", \"updated_at\": \"2023-05-12T12:00:00\", \"compressed_data\": []}]",
+                "created_at": "2023-05-18 12:00:00.000000",
+                "updated_at": "2023-05-18 12:00:00.000000",
+                "record_hash": "TaBujo2OGCc=",
+                "id": 25872,
+                "path": "/home/erica/photographs/updated_childhood_photos.tar",
+                "tilde_path": "~/photographs/updated_childhood_photos.tar",
+                "user_id": 30,
+                "content": "binary:c5521660f3..."
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "action_id": "step5_action0",
+      "step_id": 5,
+      "call_id": "call_23eb715d68564b448f5735",
+      "tool_name": "gmail__send_email",
+      "parameters": {
+        "attachment_file_paths": [
+          "/home/erica/photographs/updated_childhood_photos.tar"
+        ],
+        "body": "Checkout attachments.",
+        "email_addresses": [
+          "parent1@example.com",
+          "parent2@example.com"
+        ],
+        "subject": "Childhood Memories"
+      },
+      "audit_id": 7,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "error",
+        "message": "Response status code is 422:\n{\"message\":\"No user found with email parent1@example.com.\"}",
+        "audit_id": 7,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    }
+  ]
+}

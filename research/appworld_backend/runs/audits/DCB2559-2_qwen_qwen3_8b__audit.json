@@ -1,0 +1,177 @@
+{
+  "schema_version": "audit_sidecar_v1",
+  "trajectory_id": "20230518T120000Z_c1d6c500",
+  "agent": "qwen",
+  "model": "qwen3-8b",
+  "task_id": "dcb2559_2",
+  "task": "My amazon prime membership just expired yesterday. Renew it for the same duration.",
+  "knowledge_level": "KL1",
+  "audit_context": {
+    "current_datetime": "2023-05-18T12:00:00",
+    "timezone": "UTC"
+  },
+  "source_trajectory": "../trajectories/DCB2559-2_qwen_qwen3_8b.json",
+  "records": [
+    {
+      "action_id": "step1_action0",
+      "step_id": 1,
+      "call_id": "call_11219622835740ec9f0ae8",
+      "tool_name": "amazon__show_payment_cards",
+      "parameters": {},
+      "audit_id": 1,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": [
+          {
+            "payment_card_id": 220,
+            "card_name": "Chase",
+            "owner_name": "Brenda Smith",
+            "card_number": 9124666159012194,
+            "expiry_year": 2023,
+            "expiry_month": 4,
+            "cvv_number": 626
+          },
+          {
+            "payment_card_id": 221,
+            "card_name": "Visa",
+            "owner_name": "Brenda Smith",
+            "card_number": 2852313818763734,
+            "expiry_year": 2024,
+            "expiry_month": 3,
+            "cvv_number": 411
+          },
+          {
+            "payment_card_id": 222,
+            "card_name": "HSBC",
+            "owner_name": "Brenda Smith",
+            "card_number": 6556831270644908,
+            "expiry_year": 2023,
+            "expiry_month": 12,
+            "cvv_number": 894
+          },
+          {
+            "payment_card_id": 223,
+            "card_name": "Discover",
+            "owner_name": "Brenda Smith",
+            "card_number": 6295255479003642,
+            "expiry_year": 2022,
+            "expiry_month": 4,
+            "cvv_number": 701
+          },
+          {
+            "payment_card_id": 224,
+            "card_name": "American Express",
+            "owner_name": "Brenda Smith",
+            "card_number": 1715289950351370,
+            "expiry_year": 2023,
+            "expiry_month": 7,
+            "cvv_number": 427
+          }
+        ],
+        "audit_id": 1,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step2_action0",
+      "step_id": 2,
+      "call_id": "call_ac69876486884160bc2f51",
+      "tool_name": "amazon__subscribe_prime",
+      "parameters": {
+        "payment_card_id": 221
+      },
+      "audit_id": 2,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "error",
+        "message": "Response status code is 422:\n{\"message\":\"Validation error. Reason: \\nduration: field required\"}",
+        "audit_id": 2,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step3_action0",
+      "step_id": 3,
+      "call_id": "call_4b2f39ac83fe4404ac8442",
+      "tool_name": "amazon__subscribe_prime",
+      "parameters": {
+        "payment_card_id": 221,
+        "duration": "1 year"
+      },
+      "audit_id": 3,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "error",
+        "message": "Response status code is 422:\n{\"message\":\"Validation error. Reason: \\nduration: unexpected value; permitted: 'monthly', 'yearly'\"}",
+        "audit_id": 3,
+        "state_before": {},
+        "state_after": {},
+        "state_delta": {}
+      }
+    },
+    {
+      "action_id": "step4_action0",
+      "step_id": 4,
+      "call_id": "call_ace8425fff6c4c4987a8ce",
+      "tool_name": "amazon__subscribe_prime",
+      "parameters": {
+        "payment_card_id": 221,
+        "duration": "yearly"
+      },
+      "audit_id": 4,
+      "claim_pre": null,
+      "claim_post": null,
+      "gateway_result": {
+        "status": "success",
+        "data": {
+          "message": "You have subscribed to yearly prime membership. Your subscription will be active until 2024-05-17.",
+          "prime_subscription_id": 123
+        },
+        "audit_id": 4,
+        "state_before": {
+          "amazon.prime_subscriptions": []
+        },
+        "state_after": {
+          "amazon.prime_subscriptions": [
+            {
+              "start_date": "2023-05-18 12:00:00.000000",
+              "end_date": "2024-05-17 23:59:59.000000",
+              "record_hash": "L896MesHXjA=",
+              "id": 123,
+              "user_id": 50,
+              "payment_card_digits": "3734",
+              "receipt_download_count": 0,
+              "paid_amount": 140.0
+            }
+          ]
+        },
+        "state_delta": {
+          "amazon.prime_subscriptions": [
+            {
+              "op": "INSERT",
+              "id": 123,
+              "row": {
+                "start_date": "2023-05-18 12:00:00.000000",
+                "end_date": "2024-05-17 23:59:59.000000",
+                "record_hash": "L896MesHXjA=",
+                "id": 123,
+                "user_id": 50,
+                "payment_card_digits": "3734",
+                "receipt_download_count": 0,
+                "paid_amount": 140.0
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,168 @@
+[
+  {
+    "step_id": 1,
+    "claims": [
+      {
+        "span": "I will start by listing your Gmail drafts to see which ones exist",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 2,
+    "claims": [
+      {
+        "span": "I have retrieved the list of drafts",
+        "type": "action_completion",
+        "requires_validation": true,
+        "validation_scope": "same_or_previous_steps"
+      },
+      {
+        "span": "I will check whether there are more drafts on additional pages",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "before deciding which ones to delete",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  },
+  {
+    "step_id": 3,
+    "claims": [
+      {
+        "span": "I have confirmed there are 18 drafts total",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "no more pages",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "Now I need to determine how drafts can be deleted",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "let me inspect whether drafts are tied to threads by looking up one of the drafts' ids as a thread",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 4,
+    "claims": [
+      {
+        "span": "The draft id is not a thread id",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "so I need to understand how drafts are associated with threads",
+        "type": "non_actionable_text",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "Let me search the inbox",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "outbox for threads matching these draft subjects",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 5,
+    "claims": [
+      {
+        "span": "The drafts are standalone",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "not attached to any thread",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "all threads show `draft_ids: []`",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      },
+      {
+        "span": "`gmail__delete_thread` is the only deletion tool available",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "let me test whether it accepts a draft id by attempting to delete one of the qualifying drafts (draft 27",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "which has an empty body",
+        "type": "observation",
+        "requires_validation": true,
+        "validation_scope": "previous_steps"
+      }
+    ]
+  },
+  {
+    "step_id": 6,
+    "claims": [
+      {
+        "span": "The draft cannot be deleted via that path",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      },
+      {
+        "span": "so let me scan the full inbox",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "outbox thread lists to see if any thread contains drafts",
+        "type": "action_intention",
+        "requires_validation": true,
+        "validation_scope": "same_or_following_steps"
+      },
+      {
+        "span": "which would be how they get deleted",
+        "type": "reasoning_conclusion",
+        "requires_validation": false,
+        "validation_scope": "—"
+      }
+    ]
+  },
+  {
+    "step_id": 7,
+    "claims": []
+  }
+]
