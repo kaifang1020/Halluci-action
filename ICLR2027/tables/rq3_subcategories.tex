@@ -1,0 +1,69 @@
+\begin{table}[t]
+\centering
+\caption{Definitions and one example per theme. Each definition states a
+condition rather than describing an instance, so a new case can be assigned
+without reference to the ones already coded. Examples are verbatim from the
+trajectories. Themes marked $\ddagger$ fold together sub-themes distinguished
+during coding; the components are named in the definition.}
+\label{tab:rq3-subcategories}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.15}
+% This table had two faults, and they had one cause.  It ran 33.8pt past the
+% right margin, and it was 39.4pt taller than a page -- so its last rows printed
+% over the folio.  Both came from the Theme column being `l', i.e. sized by its
+% longest entry: dropped-guardrail-before-write sets to 113pt at \scriptsize,
+% which is 28% of the measure spent on a column whose other entries are half
+% that, and it squeezed the two prose columns into more lines than they needed.
+%
+% Theme is now a fixed 0.20 (79.5pt) and wraps.  Theme names are hyphenated
+% compounds, so they break at their own hyphens; six of the seventeen take two
+% lines, at no cost in row height because the prose cell beside each of them is
+% taller anyway.  That hands 34pt to the prose columns, which is enough line
+% saving to bring the table inside a page.
+%
+% Ragged right on all three: justified text at this measure hyphenates heavily,
+% and the Example column has to hold
+% \texttt{receive\_purchase\_order(order\_id=2,} unbroken -- 130.3pt, the only
+% break point being the space after the comma -- which overflowed a justified
+% line.  At 0.376 the column is 149.4pt and it clears comfortably.
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.20\textwidth}
+                    >{\raggedright\arraybackslash}p{0.376\textwidth}
+                    >{\raggedright\arraybackslash}p{0.376\textwidth}@{}}
+\toprule
+\textbf{Theme} & \textbf{Definition} & \textbf{Example} \\
+\midrule
+\multicolumn{3}{@{}l}{\textbf{C1 --- no operation was attempted in pursuit of the claim}} \\
+\addlinespace[2pt]
+capability-gap-workaround & The promised check has no corresponding tool or field. The agent commits to it verbally, then substitutes an adjacent query or drops it. & \emph{``Let me check the valid priority values''} --- no such enumeration exists; the agent guesses and escalates. \\
+silently-displaced$\ddagger$ & The stated check is replaced by a different line of enquiry, or one clause of an enumerated commitment is never executed, with no notice to the user. Folds \emph{displaced-by-alternative} and \emph{partial-enumeration}. & \emph{``Let me check what products might be relevant.''} --- the trace goes to \texttt{get\_customer} instead. \\
+dropped-guardrail-before-write & A verification the agent proposed for itself is skipped and the consequential write proceeds anyway. & \emph{``Let me search for tickets by name containing `cable' ''} --- no search; the ticket is acted on directly. \\
+terminal-unfulfilled-commitment & The trajectory ends with a promised action neither executed nor explicitly handed back to the user. & \emph{``schedule the production order''} --- the trajectory stops after the product lookup. \\
+hidden-retraction & The commitment is withdrawn only inside hidden reasoning; the last thing visible to the user is the commitment. & \emph{``Let me post the credit note first''} --- reversed in a \texttt{<reasoning>} block the user never sees. \\
+fabricated-completion & Past-tense assertion of work that never occurred. & \emph{``I have completed the pipeline review.''} --- the trace holds one \texttt{search\_leads} call. \\
+\addlinespace[3pt]
+\multicolumn{3}{@{}l}{\textbf{C2 --- an operation was attempted, but not on the claimed target}} \\
+\addlinespace[2pt]
+interface-forced-substitution & The claimed target is not addressable through the tool set, so the operation is silently redirected to an adjacent entity while the narration keeps the original target. & \emph{``I'll log the interaction against the lead.''} --- \texttt{log\_interaction} takes only a \texttt{customer\_id}; the write lands on the customer. \\
+effect-overclaim$\ddagger$ & A weaker or misscoped operation is executed and reported as having achieved the claimed effect. Folds \emph{surrogate-action-as-effect}, \emph{misscoped-query} and \emph{rationalized-success}. & \emph{``The 12\% loyalty discount has been successfully applied''} --- the trace shows a status update and a note, no price change. \\
+unverified-id-binding & A name is bound to a guessed or incorrect identifier with no lookup to confirm it. & \emph{``OP-001 for Hayashi Corp has been marked as won''} --- \texttt{opportunity\_id=1} resolves to Tanaka Yuki. \\
+\addlinespace[3pt]
+\multicolumn{3}{@{}l}{\textbf{C3 --- the operation matched, but the asserted outcome is not established}} \\
+\addlinespace[2pt]
+unverified-success$\ddagger$ & The reported success is not established by the trace: the envelope status is read over a contradicting payload, a different successful action is reported in its place, or a fallback record is claimed after a tool broke. & \emph{``I have arranged for a partial delivery of 5 units''} --- the payload returns \texttt{delivery\_created=false}. \\
+unverified-attribute$\ddagger$ & The action succeeded, but an identity or filtering criterion decorating the report was never established. & \emph{``\ldots created in the `Marketing Campaign Q1' project''} --- no query ties the project id to that name. \\
+\addlinespace[3pt]
+\multicolumn{3}{@{}l}{\textbf{C4 --- executed and disclosed by no claim: writes}} \\
+\addlinespace[2pt]
+history-edited$\ddagger$ & Failed writes are retried, or removed from the narration, so that only the eventual success is reported. Folds \emph{silent-retry-loop} and \emph{failure-airbrushed}. & \texttt{process\_refund} issued repeatedly after failures; the one that succeeded is never mentioned. \\
+undisclosed-guessed-id-write & A forbidden write is attempted with a fabricated identifier; the visible text reports only the resulting error. & \texttt{receive\_purchase\_order(order\_id=2, product\_id=1)} --- the reply says only that the product does not exist. \\
+undisclosed-collateral-write & A write incidental to the workflow is executed and never mentioned. & \texttt{create\_customer(``Nakamura Aoi'', \ldots)} executed while completing an unrelated request. \\
+\addlinespace[3pt]
+\multicolumn{3}{@{}l}{\textbf{C4 --- executed and disclosed by no claim: reads}} \\
+\addlinespace[2pt]
+silent-step & The step carrying the call has no visible assistant text at all. & A turn consisting only of tool calls, the default style of three of the five agents. \\
+narration-mismatch & The step has narration, but it describes a different action, a broader plan, or another call in the same step. & A step narrating a stock check while also issuing an unmentioned customer lookup. \\
+reasoning-only & The action is mentioned only inside hidden reasoning. & The call appears in a \texttt{<reasoning>} block with nothing in the visible reply. \\
+\bottomrule
+\end{tabular}
+\end{table}

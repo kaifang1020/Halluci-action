@@ -1,0 +1,173 @@
+% ===========================================================================
+% TWO VERSIONS OF THIS TABLE LIVE IN THIS FILE.
+%
+%   ACTIVE  : three columns -- Gate | Theme | n, with \multirow gate labels.
+%   PARKED  : two columns -- a ledger, gate as a bold group row with its total
+%             in the same column as the counts, tabular* filling the measure.
+%             Kept commented out at the bottom, not deleted.
+%
+% To swap: comment out everything from "BEGIN ACTIVE" to "END ACTIVE" and strip
+% the leading "% " from the parked block.  Nothing outside this file changes --
+% sections/7_empirical_findings.tex only does \input{tables/rq3_failure_modes},
+% and both versions define \hirisk the same way, so the caption's red swatch
+% matches either one.
+%
+% The two differ in footprint: the ledger is about three lines taller and fills
+% the full 2.67in column width, the three-column version is shorter and stops
+% ~0.43in short of its own caption.
+% ===========================================================================
+
+% --------------------------- BEGIN ACTIVE (3-column) -----------------------
+% Tabular only -- no float, no caption. It is placed inside the left minipage
+% of the side-by-side float in sections/7_empirical_findings.tex, so it has to
+% fit 0.485\textwidth (2.67in) beside the 2.65in composition figure.
+%
+% Three columns on purpose. The Req./Forb. columns that used to sit here made
+% the table 4.2in wide, which is why it could not share a float with anything.
+% The severity information they carried is now the red highlight, and the rule
+% is stated in the caption: a theme is marked when at least five of its
+% instances concern an operation the task required or forbade.
+%
+% Every row below is reconciled against research/rq3_taxonomy/thematic/
+% evidence_cards.jsonl through the consolidation map in write_open_codes.py.
+% Gate cells are stacked as  C1 66 / execution , not  C1 execution / 66 .  The
+% gate column is `l', so its width is whatever the widest cell needs, and with
+% the gate name on the first line that was bold "C3 verification" -- 0.85in of
+% a 2.67in measure.  It pushed the whole tabular 26pt past the minipage and
+% into the figure's half, which is what made the n column look jammed against
+% Figure 5.  Putting the name on its own line drops the widest cell to plain
+% "verification", about 0.55in, and the table comes back inside its column.
+% Note C3 has only two theme rows, so its gate cell cannot exceed two lines --
+% that is why the count shares the first line rather than getting a third.
+% \colorbox, not \cellcolor: two highlighted rows are adjacent in both C2 and
+% C4-write, and a full-height cell fill makes the pair read as one merged
+% block.  A tight box around the words keeps them separate, and matches the
+% swatch in the caption.
+% \hirisk is \hlred from settings.tex -- one definition for the tinted themes
+% here and the "Red" swatch in the caption, with \fboxsep scoped inside it.
+\let\hirisk\hlred
+% 2pt, down from 3pt: two inter-column gaps, so this is only 4pt of the 26pt
+% the table had to give back, but it is 4pt that costs nothing to read.
+\setlength{\tabcolsep}{2pt}
+\footnotesize
+% \scriptsize
+% Plain l for the theme column: at \scriptsize the longest name
+% (terminal-unfulfilled-commitment) sets to ~1.4in, so the whole tabular is
+% ~2.1in and sits inside the 2.67in minipage without wrapping.  Wrapping is
+% worth avoiding here because a broken hyphenated name reads as two themes.
+\begin{tabular}{@{}llr@{}}
+\toprule
+\textbf{Gate} & \textbf{Theme} & \textbf{$n$} \\
+\midrule
+\multirow{6}{*}{\shortstack[l]{\textbf{C1}~$66$\\\textbf{execution}}}
+ & capability-gap-workaround                & 25 \\
+ & silently-displaced                       & 19 \\
+ & dropped-guardrail-before-write           & 10 \\
+ & \hirisk{terminal-unfulfilled-commitment} &  7 \\
+ & hidden-retraction                        &  3 \\
+ & fabricated-completion                    &  2 \\
+\midrule
+\multirow{3}{*}{\shortstack[l]{\textbf{C2}~$33$\\\textbf{grounding}}}
+ & \hirisk{interface-forced-substitution}   & 20 \\
+ & \hirisk{effect-overclaim}                &  7 \\
+ & unverified-id-binding                    &  6 \\
+\midrule
+\multirow{2}{*}{\shortstack[l]{\textbf{C3}~$8$\\\textbf{verification}}}
+ & unverified-success                       &  4 \\
+ & unverified-attribute                     &  4 \\
+\midrule
+\multirow{3}{*}{\shortstack[l]{\textbf{C4}~$22$\\\textbf{disclosure}\\\textbf{write}}}
+ & \hirisk{history-edited}                  & 11 \\
+ & \hirisk{undisclosed-guessed-id-write}    & 10 \\
+ & undisclosed-collateral-write             &  1 \\
+\midrule
+\multirow{3}{*}{\shortstack[l]{\textbf{C4}~$586$\\\textbf{disclosure}\\\textbf{read}}}
+ & silent-step                              & 528 \\
+ & narration-mismatch                       &  42 \\
+ & reasoning-only                           &  16 \\
+\bottomrule
+\end{tabular}
+% ---------------------------- END ACTIVE (3-column) ------------------------
+
+
+% ===========================================================================
+% PARKED ALTERNATIVE (2-column ledger).  Uncomment to use; comment out the
+% active block above first, or the table will be typeset twice.
+% ===========================================================================
+% % Tabular only -- no float, no caption. It is placed inside the left minipage
+% % of the side-by-side float in sections/7_empirical_findings.tex, so it has to
+% % fit 0.485\textwidth (2.67in) beside the 2.65in composition figure.
+% %
+% % The Req./Forb. columns that used to sit here made the table 4.2in wide, which
+% % is why it could not share a float with anything. The severity information they
+% % carried is now the red highlight, and the rule is stated in the caption: a
+% % theme is marked when at least five of its instances concern an operation the
+% % task required or forbade.
+% %
+% % TWO columns, not three. The gate had a column of its own, which spent 0.35in
+% % of the 2.67in on five labels spread down seventeen rows and left the rest of
+% % that strip blank -- the single biggest patch of white in the table. The gate
+% % is now a bold row opening its own group, and its total sits in the same column
+% % as the counts it is the sum of, so 66 = 25+19+10+7+3+2 reads straight down
+% % instead of across. The \midrule between groups goes with it: a bold label plus
+% % \addlinespace separates them, which is also how the sibling taxonomy table in
+% % the appendix (tables/rq3_subcategories) is set.
+% %
+% % tabular* with \extracolsep{\fill} rather than plain tabular: dropping the gate
+% % column left the table 0.43in narrower than its own caption, so it floated in
+% % the middle of a column whose other half is a figure running the full width.
+% % The fill puts that slack in the one inter-column gap instead, which squares
+% % the table with the caption above it and the figure beside it, and turns the
+% % name-to-count gap into a consistent ledger leader rather than a ragged hole.
+% % It costs no height. (The leading @{\extracolsep{\fill}} also suppresses the
+% % leftmost \tabcolsep, which is why there is no @{} in front of it.)
+% %
+% % Gate labels stay bare (C1, C2, ...) because the figure's legend beside this
+% % table already spells out unexecuted / misgrounded / unverified / undisclosed.
+% %
+% % Every row below is reconciled against research/rq3_taxonomy/thematic/
+% % evidence_cards.jsonl through the consolidation map in write_open_codes.py.
+% %
+% % \colorbox, not \cellcolor: two highlighted rows are adjacent in both C2 and
+% % C4-write, and a full-height cell fill makes the pair read as one merged
+% % block.  A tight box around the words keeps them separate, and matches the
+% % swatch in the caption.
+% \let\hirisk\hlred
+% % Indent for theme rows under their gate row. An explicit \hspace rather than a
+% % leading space, because \colorbox on the highlighted rows would swallow a
+% % space and set those four themes 1.4pt left of all the others.
+% \newcommand{\thm}{\hspace{0.9em}}
+% \setlength{\tabcolsep}{3pt}
+% \footnotesize
+% \begin{tabular*}{\linewidth}{@{\extracolsep{\fill}}lr@{}}
+% \toprule
+% \textbf{Gate / theme} & \textbf{$n$} \\
+% \midrule
+% \textbf{C1} & \textbf{66} \\
+% \thm capability-gap-workaround                & 25 \\
+% \thm silently-displaced                       & 19 \\
+% \thm dropped-guardrail-before-write           & 10 \\
+% \thm \hirisk{terminal-unfulfilled-commitment} &  7 \\
+% \thm hidden-retraction                        &  3 \\
+% \thm fabricated-completion                    &  2 \\
+% \addlinespace[3pt]
+% \textbf{C2} & \textbf{33} \\
+% \thm \hirisk{interface-forced-substitution}   & 20 \\
+% \thm \hirisk{effect-overclaim}                &  7 \\
+% \thm unverified-id-binding                    &  6 \\
+% \addlinespace[3pt]
+% \textbf{C3} & \textbf{8} \\
+% \thm unverified-success                       &  4 \\
+% \thm unverified-attribute                     &  4 \\
+% \addlinespace[3pt]
+% \textbf{C4} write & \textbf{22} \\
+% \thm \hirisk{history-edited}                  & 11 \\
+% \thm \hirisk{undisclosed-guessed-id-write}    & 10 \\
+% \thm undisclosed-collateral-write             &  1 \\
+% \addlinespace[3pt]
+% \textbf{C4} read & \textbf{586} \\
+% \thm silent-step                              & 528 \\
+% \thm narration-mismatch                       &  42 \\
+% \thm reasoning-only                           &  16 \\
+% \bottomrule
+% \end{tabular*}

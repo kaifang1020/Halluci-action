@@ -1,0 +1,45 @@
+% ---------------------------------------------------------------------------
+% Figure 1: the original artwork (claim_action_gap_v2.pdf), unchanged, with a
+% tinted band behind each SAYS and DOES row.  Nothing else about the figure is
+% touched -- this file only lays colour over the existing export.
+%
+% The tints are drawn OVER the image rather than behind it, because the export
+% carries an opaque white background and anything behind it would be hidden.
+% Drawing over it is safe here only because the fills use the SATURATED accent
+% colours at low opacity, not a pale colour at high opacity:
+%   8% of (31,92,153) over white  -> (237,242,247), the light blue we want
+%   8% of (31,92,153) over black  -> (2,7,12),      i.e. the text stays black
+% A pale fill at high opacity would give the same band colour but grey out
+% every glyph underneath it.
+%
+% Band geometry is measured off the artwork itself, in image pixels
+% (claim_action_gap_v3.png is 1859 x 2342 and is the same layout as the PDF):
+%   accent bars      x 243..256        right end of the separator rules  x 1824
+%   panel A  says y 425..607    does y 900..1091
+%   panel B  says y 1375..1657  does y 1950..2307
+% Each band runs from the left edge of its accent bar to the right end of the
+% rules, and matches that bar's vertical extent exactly.
+%
+% The scope below re-bases the coordinate system on the image node, so x and y
+% run 0..1 across the artwork and the bands track it at whatever width the
+% figure is included.  To re-derive the numbers after a new export:
+%   fraction_x = px / 1859        fraction_y = 1 - (px / 2342)
+%
+% Parent preamble must provide tikz (pgfplots pulls it in).
+% ---------------------------------------------------------------------------
+\begin{tikzpicture}
+  \definecolor{cagSay}{RGB}{31,92,153}
+  \definecolor{cagDo}{RGB}{179,89,10}
+
+  \node[anchor=south west, inner sep=0pt] (cagimg) at (0,0)
+    {\includegraphics[width=0.42\textwidth]{figures/claim_action_gap_v2}};
+
+  \begin{scope}[x={(cagimg.south east)}, y={(cagimg.north west)}]
+    % panel A
+    \fill[cagSay, opacity=0.08] (0.1307,0.7408) rectangle (0.9812,0.8185);
+    \fill[cagDo,  opacity=0.09] (0.1307,0.5342) rectangle (0.9812,0.6157);
+    % panel B
+    \fill[cagSay, opacity=0.08] (0.1307,0.2925) rectangle (0.9812,0.4129);
+    \fill[cagDo,  opacity=0.09] (0.1307,0.0150) rectangle (0.9812,0.1674);
+  \end{scope}
+\end{tikzpicture}

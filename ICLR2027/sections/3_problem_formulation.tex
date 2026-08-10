@@ -1,0 +1,210 @@
+\section{Problem Formulation}
+\label{sec: problem_formulation}
+
+\subsection{Problem Statement}
+% Motivation, the contrast with factual hallucination, and the oversight risk are
+% all made in Section 1; this subsection only sets up the formal objects.
+Agent behavior has two layers. The \textbf{verbal layer} $o_t$ is the
+natural-language output visible to users and evaluators; the \textbf{behavioral
+layer} $a_t$ is the set of actions executed at that step. The environment records
+their effects independently of anything the agent says. We term a divergence between the two
+\textbf{halluci-action}. Only the behavioral record is outside the agent's
+control, so it is the ground truth: every claim about execution is judged
+against what the trace shows, never against the report that describes it. Because the
+divergence is defined between two sets the agent itself produces, rather than
+against an external referent, it runs in two directions: a claim with no action
+behind it, and an action with no claim in front of it. The remainder of this
+section makes each precise: what counts as a checkable claim, what counts as an
+executed action, and when the two match.
+
+\subsection{Primitives: Claims and Actions}
+We consider an LLM-based agent operating in a tool-augmented, multi-step execution
+setting. The agent's \textbf{trajectory} over $T$ steps is:
+%
+\begin{equation}
+    \tau \;=\; \bigl(s_1, a_1, o_1\bigr),\; \ldots,\; \bigl(s_T, a_T, o_T\bigr)
+\end{equation}
+where $s_t$ is the environment state and $o_t$ is the user-facing output at step
+$t$, and $a_t$ is the set of actions the agent executes at that step---a step may
+issue several tool calls, or none. Executing $a_t$ leaves a \textbf{behavioral
+record} $B_t$, one entry per call:
+\begin{equation}
+B_t = \{(\texttt{tool\_name}, \texttt{parameters}, \texttt{return\_value},
+\Delta\texttt{env\_state})\}
+\end{equation}
+Detecting halluci-action requires isolating \emph{what the agent claims}
+from its output~$o_t$, identifying \emph{what it actually did} in~$B_t$, and
+formalizing \emph{the gap} between them.
+
+% \paragraph{A running example.} The agent replies: ``Let me pull up \#SO042. I have
+% cancelled it and refunded you.'' This carries a prospective \emph{intention} claim
+% (``let me pull up'') and two retrospective \emph{completion} claims (``cancelled,''
+% ``refunded''), each naming a target operation. The definitions below ask two questions
+% of such a reply: \emph{forward}, whether each claim has a matching action in $B_t$;
+% and \emph{reverse}, whether each action in $B_t$ has a disclosing claim.
+% \kaifang{The example here is to make the following definition clearer, which can be made as a figure or left out.}
+
+\paragraph{The Claim: What the Agent Says It Did or Will Do.}
+Not every sentence in $o_t$ constitutes a checkable commitment. An agent may produce
+opinions, world-knowledge claims, or descriptions of internal deliberation---none of
+which can be verified against~$B_t$. We restrict attention to statements that are
+both self-referential and tied to a specific executable operation.
+
+\begin{definition}[Verbal Claim]
+\label{def:verbal-claim}
+A verbal claim is a declarative statement $c$ extracted from $o_t$ satisfying all
+three of the following conditions:
+\begin{itemize}
+    \item[(i)] \textit{Self-referential}: $c$ concerns the agent's own behavior or
+    state, not facts about the external world.
+    \item[(ii)] \textit{Action-implicating}: $c$ entails the occurrence or deliberate
+    non-occurrence of at least one specific executable operation---one already
+    performed or firmly intended, not merely hedged.
+    \item[(iii)] \textit{Independently verifiable}: the truth value of $c$ can be
+    determined by inspecting $B_t$ without further explanation from the agent.
+\end{itemize}
+Let $\mathcal{C}_t$ denote the set of verbal claims extracted from $o_t$. A statement
+failing any condition is excluded from analysis. Each claim $c \in \mathcal{C}_t$
+implicitly specifies a $\text{target}(c)$: the executable operation (its type, and key
+parameters when present) that $c$ refers to.
+\end{definition}
+
+\paragraph{The Action: What the Agent Actually Does.}
+The behavioral side is the trajectory itself: each executed event $b \in B_t$ realizes
+an operation $\text{action}(b)$---a tool call with its arguments and its effect on
+state---recorded by the environment independently of anything the agent says. These
+events are the ground truth for what the agent \emph{actually} did; every claim is
+judged against them, never against the agent's own account.
+
+\paragraph{From steps to trajectories.} Definition~\ref{def:verbal-claim} and
+the behavioral record are both stated per step. The two sets that
+Section~\ref{sec: HA_framework} scores are their unions over the trajectory,
+\begin{equation}
+    \mathcal{C}_\tau \;=\; \bigcup_{t=1}^{T}\mathcal{C}_t,
+    \qquad
+    \mathcal{A}_\tau \;=\; \bigcup_{t=1}^{T} B_t,
+    \label{eq:traj-sets}
+\end{equation}
+so $\mathcal{C}_\tau$ is every eligible claim a trajectory contains and
+$\mathcal{A}_\tau$ every action it executed. Elements of $\mathcal{A}_\tau$ are
+individual executed events, so an operation issued $k$ times contributes $k$
+elements. All rates in Section~\ref{sec: HA_framework} are computed over this
+pair.
+
+\subsection{Defining Halluci-Action}
+A claim and an action are defined independently; a halluci-action is a mismatch between
+them. We first define when a claim and an action \emph{match}, then read the mismatch
+from both sides---a claim with no supporting action (forward), and an action with no
+disclosing claim (reverse).
+
+\paragraph{Matching claims and actions.} Both directions rest on one symmetric relation:
+a claim and an action match when they name the same operation within a temporal window.
+
+\begin{definition}[Claim--Action Matching]
+\label{def:pairing}
+A claim $c$ at step $t$ and an executed action $b$ at step $s$ \emph{match} iff
+$\text{action}(b) = \text{target}(c)$ and $s - t \in [\delta^-, \delta^+]$, where
+$\delta^- \leq 0 \leq \delta^+$ is a window (a hyperparameter) absorbing the lag between
+speaking and acting. The relation has two projections,
+\begin{equation}
+\pi(c) = \{\, b : b \text{ matches } c \,\}, \qquad
+\kappa(b) = \{\, c : c \text{ matches } b \,\},
+\end{equation}
+the actions matching a claim and the claims matching an action. Compound claims are
+split into atomic claims before matching.
+\end{definition}
+
+\paragraph{The forward gap: an unsupported claim.}
+\begin{definition}[Consistency and Forward Halluci-Action]
+\label{def:consistency}\label{def:halluci-action}
+A claim $c$ is \emph{consistent} if some matching action carries it out as stated:
+\begin{equation}
+\text{Con}(c) = \mathbbm{1}\bigl[\,\pi(c) \neq \emptyset \;\land\;
+\text{some } b \in \pi(c) \text{ does what } c \text{ asserts}\,\bigr].
+\end{equation}
+A \textbf{forward halluci-action} is an inconsistent claim ($\text{Con}(c) = 0$): the
+agent said it, but the trace either lacks the action ($\pi(c) = \emptyset$) or performed
+it differently from what was stated.
+\end{definition}
+
+\paragraph{The reverse gap: an undisclosed action.}
+\begin{definition}[Reverse Halluci-Action]
+\label{def:silent}
+An executed action $b$ is \emph{disclosed} if $\kappa(b) \neq \emptyset$---some
+claim names it. A \textbf{reverse halluci-action} is an undisclosed action
+($\kappa(b) = \emptyset$):
+executed, but flagged by no claim, hence invisible to anyone reading only the agent's
+reply.
+\end{definition}
+
+Forward halluci-actions are claim-anchored and reverse ones action-anchored, so
+Section~\ref{sec: HA_framework} scores them with complementary measures---a
+bidirectional alignment rate (HAR) and a severity-focused variant---rather than
+a claim-only score.
+
+% \subsection{Formal Definitions}
+% We consider an LLM-based agent operating in a tool-augmented, multi-step execution
+% setting. The agent's \textbf{trajectory} over $T$ steps is:
+% \begin{equation}
+% \tau \;=\; \bigl(s_1, a_1, o_1\bigr),\; \ldots,\; \bigl(s_T, a_T, o_T\bigr)
+% \end{equation}
+% where $s_t$ is the environment state, $a_t$ is the executed action, and $o_t$ is the 
+% user-facing output at step $t$. The behavioral record $B_t$ captures the complete set 
+% of observable execution events at step $t$:
+% \begin{equation}
+% B_t = \{(\texttt{tool\_name}, \texttt{parameters}, \texttt{return\_value}, 
+% \Delta\texttt{env\_state})\}
+% \end{equation}
+% All subsequent definitions operate on $(o_t, B_t)$ pairs drawn from $\tau$.
+
+% \begin{definition}[Verbal Claim]
+% \label{def:verbal-claim}
+% A verbal claim is a declarative statement $c$ extracted from $o_t$ that is (i) 
+% \textit{self-referential}: concerns the agent's own behavior; (ii) 
+% \textit{action-implicating}: entails the occurrence or deliberate non-occurrence of 
+% at least one executable operation; and (iii) \textit{independently verifiable}: its 
+% truth value can be determined by inspecting $B_t$ alone. Let $\mathcal{C}_t$ denote 
+% the set of verbal claims extracted from $o_t$. Each claim $c \in \mathcal{C}_t$ is 
+% assigned a verifiability score $v(c) \in \{0.5, 1\}$, where $v(c) = 1$ for 
+% type-only claims and $v(c) = 0.5$ for claims specifying both type and key parameters. 
+% A higher score reflects greater vagueness and therefore greater oversight risk when 
+% the claim is false.
+% \end{definition}
+
+% \begin{definition}[Pairing Function]
+% \label{def:pairing}
+% Let $c \in \mathcal{C}_t$ with target action $\text{target}(c)$. The behavioral 
+% evidence for $c$ is:
+% \begin{equation}
+% \pi(c) = \{ b \in B_s : s \in [t + \delta^-, t + \delta^+],\ 
+% \text{action}(b) = \text{target}(c) \}
+% \end{equation}
+% where $[\delta^-, \delta^+]$ is a temporal search window set as evaluation 
+% hyperparameters, with $\delta^- \leq 0$ capturing retrospective claims and $\delta^+ 
+% \geq 0$ capturing prospective claims. Compound claims are decomposed into atomic 
+% claims prior to pairing.
+% \end{definition}
+
+% \begin{definition}[Claim Proposition]
+% \label{def:prop}
+% For $c \in \mathcal{C}_t$, $\text{prop}(c)$ is the executable proposition extracted 
+% from $c$ specifying what must hold in $B_t$ for $c$ to be considered true. Ground 
+% truth is always drawn from $B_t$, ensuring verification is independent of the 
+% agent's self-report.
+% \end{definition}
+
+% \begin{definition}[Consistency]
+% \label{def:consistency}
+% $\text{Con}(c) = \mathbbm{1}\left[\text{prop}(c) \models \pi(c)\right]$, where 
+% $\text{Con}(c) = 1$ if $\pi(c)$ supports $\text{prop}(c)$, and $0$ otherwise.
+% \end{definition}
+
+% \begin{definition}[Halluci-Action]
+% \label{def:halluci-action}
+% A halluci-action occurs at claim $c \in \mathcal{C}_t$ when:
+% \begin{equation}
+% \text{HA}(c) \iff v(c) > 0 \;\land\; \lnot\,\text{Con}(c)
+% \end{equation}
+% The condition $v(c) > 0$ ensures the claim constitutes a falsifiable commitment, 
+% while $\lnot\text{Con}(c)$ confirms the behavioral record does not bear it out.
+% \end{definition}

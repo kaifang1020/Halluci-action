@@ -1,0 +1,73 @@
+\section{Related Work}
+\label{sec: related_work}
+
+% ---------------------------------------------------------------------
+% 2.1  words against the world / against reasoning.
+%      (2.1 and 2.2 of the previous draft merged: both check an agent's words
+%       against a referent that is not its actions, which is one argument, not
+%       two. Paragraph break still separates the world referent from the
+%       reasoning referent.)
+% ---------------------------------------------------------------------
+\subsection{Hallucination and Faithfulness in LLM Agents}
+
+Work on hallucination has asked whether a model's generated text is supported by
+an external source such as retrieved evidence or known
+facts~\citep{lin2022truthfulqa, min2023factscore, zhao2023felm}: the ground truth
+is the external world, and the object of evaluation is the factual content of
+what the model says. As models became agents, this question moved into
+multi-step settings---surveys and benchmarks catalogue hallucination specific to
+agents and localize it within a trajectory~\citep{agent_hallu_survey2025,
+miragebench2025}, attribute a hallucination to the step at which it first
+arises~\citep{liu2026agenthallu}, and report that stronger reasoning can amplify
+rather than suppress tool hallucination~\citep{reasoning_trap2025}. These
+analyses move the unit of evaluation from a response to a step, but not the
+referent: a step is still adjudicated against what was true of the world or
+required by the task, never against what the agent itself did.
+
+A second line asks instead whether a model's account of itself can be trusted.
+Faithfulness work studies whether a stated chain-of-thought reflects the true
+reason for an answer rather than a plausible post-hoc
+rationalization~\citep{turpin2023language, lanham2023measuring,
+arcuschin2025wild, chen2025reasoning}, while recent work asks whether models can
+report their own behavior at all: fine-tuned models can articulate learned
+behaviors unprompted~\citep{betley2025tellme}, agent benchmarks separate what an
+agent knows it can do from what it actually attempts~\citep{li2026kapro}, and
+behavioral evidence alone may not establish genuine introspective
+access~\citep{singh2026introspect}. This line shares our concern with
+self-report, but its referent is the model's reasoning or disposition---a
+quantity that must be inferred through counterfactual intervention. Ours is an
+observable record: the tool calls the agent issued and the state they changed.
+
+% ---------------------------------------------------------------------
+% 2.2  words against the task.  carries the counterfactual test and the
+%      tool-receipts demarcation.  Compressed from three paragraphs to one.
+% ---------------------------------------------------------------------
+\subsection{Trajectory-Level and Procedure-Aware Evaluation}
+
+General agent benchmarks score interactive tasks by final-state
+success~\citep{liu2024agentbench, zhou2024webarena, yao2024taubench}.
+Procedure-aware evaluation asks instead \emph{how} a task was completed. Work in
+this line finds ``corrupt successes'' that pass outcome checks while violating
+required steps~\citep{cao2026pae}, shows that state-mutating actions cause most
+of the serious failures~\citep{cuadron2025saber}, and shows that an agent can
+assert completion convincingly enough to fool an outcome
+judge~\citep{falsesuccess2026}. Together these establish the execution trace,
+rather than the verbal summary, as the authoritative record of agent
+behavior---but they evaluate the action, not the report of it. The distinction
+is sharpest under a counterfactual: hold the trace fixed and change only what
+the agent says. A procedure-aware verdict is unchanged, since the same wrong
+record was still written, whereas ours inverts, because an agent that plainly
+reports the mistake it made exhibits no say--do gap at all. The closest work to
+ours builds the check into the agent system: every tool call leaves a signed
+receipt, and claims are verified against those receipts in both
+directions~\citep{basu2026toolreceipts, wang2026traceprovenance}. That work asks
+whether such a mechanism can be built. We ask what happens without one---how far
+off-the-shelf frontier agents already diverge. Our errors occur naturally rather
+than being injected, we cover five agents in two environments, and we separate
+the operations a task required from those it forbade.
+
+% [REMOVED] An unlabelled positioning paragraph used to close the section here.
+% Section 2 now ends on the demarcation from the tool-receipt line above. If the
+% referent argument is wanted in prose, Section 3.1 is the natural home for it --
+% see the note there.
+\chuke{Deception and  safety-related risks}

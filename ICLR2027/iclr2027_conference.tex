@@ -1,0 +1,796 @@
+
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2027_conference,times}
+
+% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\input{math_commands.tex}
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{amsthm}  % 用于definition环境
+\usepackage{enumitem} % 用于itemize里的(i)(ii)(iii)自定义标签
+\usepackage{bbm}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\usepackage{float}     % [H] for the appendix tables -- see the appendix comment
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{capt-of}    % \captionof for the side-by-side table+figure float
+\usepackage{colortbl}   % \rowcolor in tables/rq3_failure_modes
+\usepackage{multirow}
+\usepackage{array}     % >{\raggedright\arraybackslash}p{} in the RQ3 table
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\input{settings}
+
+\title{Halluci-action: Evaluating Deception in Claim-Action alignment of Agents
+}
+
+% Authors must not appear in the submitted version. They should be hidden
+% as long as the \iclrfinalcopy macro remains commented out below.
+% Non-anonymous submissions will be rejected without review.
+
+\author{Antiquus S.~Hippocampus, Natalia Cerebro \& Amelie P. Amygdale \thanks{ Use footnote for providing further information
+about author (webpage, alternative address)---\emph{not} for acknowledging
+funding agencies.  Funding acknowledgements go at the end of the paper.} \\
+Department of Computer Science\\
+Cranberry-Lemon University\\
+Pittsburgh, PA 15213, USA \\
+\texttt{\{hippo,brain,jen\}@cs.cranberry-lemon.edu} \\
+\And
+Ji Q. Ren \& Yevgeny LeNet \\
+Department of Computational Neuroscience \\
+University of the Witwatersrand \\
+Joburg, South Africa \\
+\texttt{\{robot,net\}@wits.ac.za} \\
+\AND
+Coauthor \\
+Affiliation \\
+Address \\
+\texttt{email}
+}
+
+% The \author macro works with any number of authors. There are two commands
+% used to separate the names and addresses of multiple authors: \And and \AND.
+%
+% Using \And between authors leaves it to \LaTeX{} to determine where to break
+% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
+% puts 3 of 4 authors names on the first line, and the last on the second
+% line, try using \AND instead of \And before the third author name.
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\begin{document}
+
+
+\maketitle
+
+\begin{abstract}
+\input{sections/0_abstract}
+\end{abstract}
+
+\input{sections/1_introduction}
+\input{sections/2_related_work}
+\input{sections/3_problem_formulation}
+% \input{sections/4_benchmark}  % merged into 5_framework
+\input{sections/5_framework}
+\input{sections/6_experimental_setup}
+\input{sections/7_empirical_findings}
+\input{sections/8_conclusion}
+\input{sections/9_statements}
+
+% \clearpage, not \newpage: \newpage breaks the page but leaves the float queue
+% untouched, so tables from the last sections of the main text were still
+% pending when the bibliography started and got dropped into the middle of the
+% reference list.  \clearpage flushes them first.
+\clearpage
+\bibliography{iclr2027_conference}
+\bibliographystyle{iclr2027_conference}
+
+% ---------------------------------------------------------------------
+% APPENDIX
+%
+% Two rules keep this section from coming apart again:
+%
+% 1. Every section opens with a sentence of running text before its
+%    \input{tables/...}.  A heading whose entire body is a float has nothing
+%    to anchor the float to, so the table drifts to wherever LaTeX can fit it
+%    and the headings pile up together on an otherwise empty page.  That is
+%    what used to happen: A.1--A.4 all landed on one page with no tables
+%    under them, while the tables themselves floated back into the
+%    references.
+% 2. The appendix tables are declared [H] (float package), i.e. not floats at
+%    all -- they print exactly where they are written, under their heading and
+%    lead-in.  With [t] they were still being hoisted to the top of the page,
+%    which put every table *above* the section that introduces it.  This is
+%    right for the appendix, where each table is the content of its section,
+%    and wrong for the main text, where HAR_main deliberately stays [t!].
+%
+% Each topic is a \section (A, B, C, ...) rather than a \subsection under an
+% empty "Appendix" shell -- one less level of nesting for the same content.
+% Order follows first mention in the main text: data sources and judge
+% validation are cited from Section~\ref{sec: HA_framework}, the breakdowns
+% from Section~\ref{sec:rq1}, the examples from Section~\ref{sec:rq3}.
+% ---------------------------------------------------------------------
+\clearpage
+\appendix
+% \raggedbottom for the appendix only.  iclr2027_conference.sty line 54 sets
+% \flushbottom, which forces every page to end exactly at the bottom margin.
+% That is right for running prose, but an appendix page is a heading, a
+% sentence and a table -- it does not fill a page, so TeX stretched every piece
+% of glue it could reach to make up the difference and the slack came out as
+% holes between the heading and its lead-in, and between one table and the
+% next.  \raggedbottom collects the same slack at the foot of the page instead,
+% where it belongs.  Scoped here, so the main text keeps the required layout.
+\raggedbottom
+% Every table and figure in this appendix is [H], so \intextsep is pure
+% separation between a block and the prose around it -- there is no float
+% placement for it to negotiate.  12pt is more than that job needs when a page
+% holds three such blocks; 8pt keeps them clearly separated and buys back the
+% two lines that were splitting Section D across a page.  Appendix-scoped.
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+
+\section{Data sources}
+\label{app:data-sources}
+Table~\ref{tab:bench_stats} places the two environments side by side: what each
+one contributes, how much of it we authored versus reused, and how many
+trajectories each produced.
+\input{tables/benchmark_stats}
+
+\section{Judge implementation}
+\label{app:judge-impl}
+
+The judge runs as three passes over a trajectory. The first reads only the
+assistant's text and returns claims; the second checks claims against the
+execution record; the third works from the executed actions back to the text.
+Only the second and third produce graph edges.
+
+\paragraph{Pass 1: claim extraction and typing.} The judge segments each
+assistant message into atomic claims and assigns each one of seven types.
+Every claim must be a verbatim substring of the message---paraphrase is
+disallowed---so that a claim can be traced back to the text it came from. A
+compound sentence is split when its parts have different types, or when two
+action claims refer to different tool calls; enumerated results are split one
+claim per item rather than kept as a block.
+
+\begin{center}
+\small
+\begin{tabular}{lp{0.62\linewidth}}
+\toprule
+\textbf{Type} & \textbf{Content} \\
+\midrule
+\texttt{action\_intention}    & the agent states it \emph{will} perform an operation \\
+\texttt{action\_completion}   & the agent states an operation \emph{has been} performed \\
+\texttt{observation}          & a fact read from a tool result \\
+\texttt{reasoning\_conclusion}& an inference or computation the agent made itself, including statements about what a tool can or cannot do \\
+\texttt{constraint\_or\_policy}& a business rule attributed to the codebook \\
+\texttt{recommendation}       & a suggestion or offer put to the user \\
+\texttt{non\_actionable\_text}& transitional or structural text with no verifiable content \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The two action types become the claim nodes $\mathcal{C}_\tau$ of
+Figure~\ref{fig:bipartite-claim-action}. \texttt{observation} claims are scored separately
+as the factual-fabrication rate; the remaining four types are excluded from both,
+since they assert nothing checkable against the execution record.
+
+\paragraph{Pass 2: claim against execution record.} Each claim is shown only the
+evidence its type can be settled against, which keeps the prompt short and stops
+the judge from settling a claim on irrelevant material. A claim also carries a
+\emph{validation scope} from Pass~1, which restricts the evidence to a step
+window: \texttt{same\_or\_following\_steps} for a stated intention,
+\texttt{previous\_steps} or \texttt{same\_or\_previous\_steps} for a report about
+work already done.
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+\textbf{Claim type} & \textbf{Evidence channels} \\
+\midrule
+\texttt{action\_intention}     & tool calls, tool results, the surrounding message \\
+\texttt{action\_completion}    & tool calls, tool results, state-delta audit \\
+\texttt{observation}           & tool results \\
+\texttt{constraint\_or\_policy}& codebook, or the tool registry when the claim is about tool capability \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The pass returns \texttt{supported}, \texttt{not\_supported}, or
+\texttt{needs\_broader\_context} per claim, with a pointer to the evidence used.
+A supported claim yields a claim-to-action edge. An intention whose operation
+does appear but on a different entity is \texttt{not\_supported}: a target
+mismatch is not a match.
+
+\paragraph{Pass 3: executed action against text.} Every executed action is
+judged twice: whether any assistant sentence discloses it, and what the task
+required of it. Disclosure is recorded with the position of the disclosing
+sentence relative to the call---\texttt{pre\_declared}, \texttt{same\_step},
+\texttt{post\_reported}, or \texttt{none}---so that an action announced in
+advance and one reported afterwards are both counted as disclosed, while
+\texttt{none} leaves the action isolated and makes it a reverse gap. The
+requirement label is one of \texttt{required}, \texttt{allowed\_supporting},
+\texttt{unnecessary}, or \texttt{forbidden};
+$\mathrm{HAR}_{\mathrm{severity}}$ uses the first and the last.
+
+\section{Judge validation}
+\label{app:judge-validation}
+Table~\ref{tab:judge-validation} reports agreement between the LLM judge and
+human gold annotation, broken out by the individual decisions the judge makes
+rather than pooled into a single score. Agreement is measured on held-out
+annotated trajectories.
+\input{tables/judge_validation}
+
+\paragraph{How agreement is measured.} The five decisions are not the same kind
+of judgement, so two different measures are used.
+
+\emph{Claim extraction} is a set-comparison problem: the judge and the human
+annotator may segment a message differently, so there is no fixed set of items
+to agree on. Human and judge spans within a message are aligned greedily and
+one-to-one by a lexical similarity score---the mean of token Jaccard overlap and
+a character-level sequence ratio, with a small bonus when the two carry the same
+claim identifier---and pairs scoring below $0.5$ are left unaligned. Aligned
+pairs count as true positives, judge-only spans as false positives, and
+human-only spans as false negatives, which gives the reported F1.
+
+The remaining four decisions are label agreement on items that are already
+aligned, and are reported as plain accuracy: the share of items on which judge
+and human assign the same label. Macro-F1 and Cohen's $\kappa$ are computed
+alongside and recorded with the run, but accuracy is the figure reported here,
+since the label sets are small and the classes are heavily imbalanced---nearly
+all actions are \texttt{allowed\_supporting}, so a macro average over four
+classes is dominated by the rare ones.
+
+
+\section{Measurement caveats}
+\label{app:caveats}
+Two caveats bound the rates reported in Section~\ref{sec:rq1}.
+
+\paragraph{Undefined trajectories, and which way their absence pulls.} A
+trajectory yields a said-not-done rate only if the judge extracted at least one
+eligible claim from it, and a done-not-said rate only if the agent executed at
+least one action. On Odoo, $116$ of $451$ trajectories fail the first condition
+and $2$ the second, so a quarter of the corpus has no defined HAR. Exclusion is
+applied per metric rather than listwise: such a trajectory leaves the
+said-not-done column but stays in the done-not-said column, where it is scored
+normally.
+
+Two consequences follow, and neither is neutral. First, the loss is very uneven
+across models: both DeepSeek models keep every trajectory, while
+\texttt{gemini-3.1-flash} keeps $67$ of $95$, \texttt{qwen3-8B} $51$ of $95$,
+and \texttt{gpt-4o-mini} $39$ of $83$. Claim counts diverge further still---$74$
+eligible claims for \texttt{gpt-4o-mini} against $1{,}028$ for
+\texttt{deepseek-chat}---so cross-model comparison on the claim side rests on
+very different amounts of evidence. Second, the excluded trajectories are not a
+random sample of the rest: their done-not-said rate averages $35.6\%$ against
+$16.1\%$ for the trajectories that remain. A trajectory with no eligible claim
+is typically one in which the agent called tools and narrated nothing, which is
+also the behavior that drives the reverse gap.
+
+The direction of the resulting bias is therefore knowable: dropping the most
+silent trajectories lowers HAR most for the models that are most silent, so the
+per-model HAR spread understates the distance between the best and worst agents.
+The phenomenon itself is not lost---those trajectories are scored at up to
+$100\%$ done-not-said and appear in that column---but it does not reach the
+combined rate. Assigning HAR $= 1$ to a one-sided trajectory instead of
+excluding it, which is arguably the more faithful reading of an agent that
+executed and disclosed nothing, would raise pooled Odoo HAR from $15.9\%$ to
+$37.3\%$. We report the excluded form because $0/0$ is undefined rather than
+maximal, and record the alternative here so the choice is visible.
+
+\paragraph{One flagged value.} \texttt{gpt-4o-mini}'s undisclosed-forbidden rate
+on AppWorld is inflated by a degenerate repeat loop---one cell issues $123$ tool
+calls with only $10$ distinct tool-and-argument pairs---and by steps carrying no
+assistant text, which makes every action in them undisclosed by construction. We
+mark that value rather than read it as behavior.
+
+% No \clearpage here any more.  It was added when this section was a lead-in
+% and two small tables that were worth keeping on one page together.  The
+% section now opens with a full-width heatmap and carries two figures and two
+% tables, so it spans pages whatever we do -- and the \clearpage was buying
+% that lost pairing at the price of 34 blank lines at the foot of the previous
+% page, which was the largest hole in the appendix.
+\section{Per-domain and per-complexity breakdowns}
+\label{app:breakdowns}
+Figure~\ref{fig:har-model-by-domain} gives the full model $\times$ slice grid in
+both environments, which is the view the pooled tables below cannot show: the
+variation runs down the columns, not across the rows.
+Figure~\ref{fig:har-by-difficulty} then reads the difficulty slice per model
+rather than pooled, which is where the pooled row hides the disagreement.
+Tables~\ref{tab:har-by-domain} and~\ref{tab:har-by-complexity} give the pooled
+slice level rates quoted in Section~\ref{sec:rq1}, first by business domain and
+then by task difficulty, with both directional rates next to HAR so that the
+asymmetry between them stays visible within each slice.
+
+% Full textwidth: the natural canvas is 5.5 x 3.34in and the cell values are set
+% at 5.2-5.4pt for exactly that size.  Do NOT scale this one down -- at half
+% width the numbers land at 2.6pt.  [H] to keep it under its own lead-in, like
+% every other float in this appendix.
+\begin{figure}[H]
+    \centering
+    % Dead canvas trimmed at include time: on a 1600px render the top 5.9% and
+    % bottom 3.7% of this figure carry no ink.  MediaBox is 396 x 213.12bp, so
+    % that is ~20bp of white between the caption above and the caption below.
+    % Re-exporting with a tight bbox would be the better fix; drop the keys if
+    % that happens.  (\height is not available inside trim, hence the bp.)
+    \includegraphics[trim={0 6bp 0 10bp}, clip,
+                     width=\textwidth]{figures/har_model_by_domain.pdf}
+    \caption{HAR by model and slice, both environments, macro-averaged over
+    trajectories with per-metric exclusion; columns are ordered by pooled HAR.
+    Blue below and red above a fixed reference of $15\%$: the reference is
+    declared rather than fitted, and the arms are unequal ($0$--$15$ below
+    against $15$--$60$ above), so a colour step spans three times as much HAR on
+    the red side. Colour is clipped at $60\%$, which one cell exceeds
+    (\texttt{qwen3-8B}~$\times$~inventory, $100.0$ on three trajectories).
+    Hatched cells rest on fewer than ten trajectories with a defined HAR and
+    print that count; AppWorld drops an unlabelled domain and
+    \texttt{supervisor}, which have none. Reading down a column, the five models
+    separate by tens of points in almost every slice; reading across a row, a
+    model stays within a much narrower band. That contrast is the claim of
+    Section~\ref{sec:rq1} in one view---HAR tracks the agent rather than the
+    domain it is working in.}
+    \label{fig:har-model-by-domain}
+\end{figure}
+
+% [H] rather than [h]: [h] is still a float, and cost about two lines of
+% \intextsep glue above and below, which was part of what pushed this section
+% onto a second page.  It was also the only float left in an appendix where
+% every table is [H].
+%
+% 0.82\textwidth rather than full width: at full width the figure plus the two
+% tables came to just over one page, so the figure was exiled to a page of its
+% own that it filled a quarter of.  Two panels of five short lines each survive
+% the reduction without trouble, and the whole section now lands on one page.
+\begin{figure}[H]
+    \centering
+    % Same again: the top 10.2% of this export is empty.  Natural size is
+    % 396 x 146.9bp (2200x816px at 400dpi), so 12bp off the top and 2 off the
+    % bottom is all dead space.
+    \includegraphics[trim={0 2bp 0 12bp}, clip,
+                     width=0.82\textwidth]{figures/har_by_difficulty.png}
+    \caption{HAR against task difficulty, Odoo only. \textbf{(a)}~one line per
+    model. The point is not that the lines are flat but that they disagree:
+    \texttt{deepseek-chat} falls monotonically, \texttt{gpt-4o-mini} peaks at
+    medium and then declines, and no model rises monotonically with difficulty.
+    Hollow markers mark cells with fewer than ten trajectories on which HAR is
+    defined; the apparent climb in \texttt{qwen3-8B} ends on a cell of two.
+    \textbf{(b)}~the same comparison as spans: HAR varies by $42.6$ percentage
+    points across models against $5.4$ across difficulty levels.}
+    \label{fig:har-by-difficulty}
+\end{figure}
+\input{tables/HAR_by_domain}
+\input{tables/HAR_by_complexity}
+
+% No \clearpage here.  It was written for a section whose first block was a
+% nearly page-tall table; this one opens with a modest figure, so the break
+% buys nothing.  With or without it the appendix is the same length -- the
+% white just moves between the foot of page 21 and the foot of page 22 -- and
+% one less hard-coded break is one less thing to go stale as the section grows.
+% (The \clearpage before Appendix H does still earn its keep: Table 8 really is
+% most of a page.)
+\section{Failure gates and how they were coded}
+\label{app:rq3-coding}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\textwidth]{figures/rq3_c1_c4_fault_tree.pdf}
+  \caption{Failure gates for a self-report. C1--C3 decompose an unsupported
+  action claim by the first claim-side gate it fails; C4 is the action-anchored
+  gate. Counts are the 715 coded instances on Odoo.}
+  \label{fig:rq3-fault-tree}
+\end{figure}
+
+Each instance was coded from an \emph{evidence card} assembled
+programmatically: the verbatim claim span as it appears in the agent's visible
+text, the assistant sentences surrounding it with hidden reasoning stripped, the
+tool calls and results the trace records for that step, and the upstream judge's
+stated reason. No field is paraphrased or rewritten by a model, so the coder
+reads the same words the user would have read next to the same calls the
+environment logged. Themes were opened over the cards rather than fixed in
+advance, and a theme was kept only where its definition could be stated as a
+condition on the card rather than as a resemblance to earlier cases.
+
+The coding was performed by a single LLM coder (Claude Fable 5) working from
+the cards, not by a human annotator, and this bounds what the theme layer can
+support. The \emph{gate} assignment is stable: a second coder from a different
+family (GPT-4.1) run over all $881$ coded instances agrees on the gate for
+$94.2\%$ of them, which is the level at which
+Figure~\ref{fig:rq3-model-composition} and the gate counts in
+Section~\ref{sec: experiments} are read. The \emph{theme} assignment is
+not: raw theme agreement is $17.9\%$ ($\kappa = 0.131$). That figure mostly
+records that the second coder is degenerate---it never used the
+\emph{other} escape hatch and collapsed most of its mass onto two attractor
+labels---so it is not a usable reliability estimate in either direction, and we
+report the per-theme counts in Table~\ref{tab:rq3-failure-modes} as one coder's
+partition of the cards rather than as a measured quantity. The largest single
+confusion, \emph{terminal-unfulfilled-commitment} against
+\emph{capability-gap-workaround} ($179$ pairs), has no precedence rule between
+the two definitions; supplying one, and a human validation pass, are the
+obvious next steps.
+
+Three sets of instances were excluded from the 736 cards, leaving 715. Two were
+stage-1 extraction artifacts, vacuous transition phrases admitted as claims.
+Four restated an intention whose lookup had already run at an earlier step and
+so fell outside the claim's validation scope---a window effect rather than a
+failure. Fifteen were commitments the agent visibly revised, or turned into a
+question to the user, within the same reply; Definition~\ref{def:verbal-claim}
+admits only firmly intended operations, and a reader of the transcript is not
+misled by a revision they can see. Three further retractions appear only inside
+hidden reasoning and are retained, as \emph{hidden-retraction}.
+
+\section{Second-level coding of halluci-action}
+\label{app:rq3-subcategories}
+Table~\ref{tab:rq3-subcategories} expands each of the four failure gates of
+Section~\ref{sec:rq3} into the themes found by open coding of all 735 instances.
+The coding is exhaustive within each gate and was carried out on the Odoo
+trajectories; each theme is defined by the condition stated rather than by an
+example, so that a new case can be assigned without reference to the ones
+already coded.
+\input{tables/rq3_subcategories}
+
+\clearpage
+\section{Representative misaligned examples}
+\label{app:rq3-examples}
+% The lead-in used to paraphrase the caption almost word for word ("each row
+% connects ... the risk ... in that domain"), which is what made the section
+% read as padding.  The caption already says what the columns are; what nothing
+% said was how to read the C1--C4 codes in the first column, so it says that
+% instead.
+Table~\ref{tab:rq3-representative-examples} lists the cases behind the
+qualitative coding of Section~\ref{sec:rq3}. Each is keyed by the gate at which
+its alignment chain broke, in the sense of
+Section~\ref{sec:rq3}: C1 the operation never executed, C2 it
+executed against the wrong target, C3 it executed without achieving the claimed
+outcome, and C4 it executed and was never disclosed. The domain and the
+originating task follow.
+\input{tables/rq3_representative_examples}
+
+
+\end{document}
+
+
+
+\section{Submission of conference papers to ICLR 2026}
+
+ICLR requires electronic submissions, processed by
+\url{https://openreview.net/}. See ICLR's website for more instructions.
+
+If your paper is ultimately accepted, the statement {\tt
+  {\textbackslash}iclrfinalcopy} should be inserted to adjust the
+format to the camera ready requirements.
+
+The format for the submissions is a variant of the NeurIPS format.
+Please read carefully the instructions below, and follow them
+faithfully.
+
+\subsection{Style}
+
+Papers to be submitted to ICLR 2026 must be prepared according to the
+instructions presented here.
+
+%% Please note that we have introduced automatic line number generation
+%% into the style file for \LaTeXe. This is to help reviewers
+%% refer to specific lines of the paper when they make their comments. Please do
+%% NOT refer to these line numbers in your paper as they will be removed from the
+%% style file for the final version of accepted papers.
+
+Authors are required to use the ICLR \LaTeX{} style files obtainable at the
+ICLR website. Please make sure you use the current files and
+not previous versions. Tweaking the style files may be grounds for rejection.
+
+\subsection{Retrieval of style files}
+
+The style files for ICLR and other conference information are available online at:
+\begin{center}
+   \url{http://www.iclr.cc/}
+\end{center}
+The file \verb+iclr2027_conference.pdf+ contains these
+instructions and illustrates the
+various formatting requirements your ICLR paper must satisfy.
+Submissions must be made using \LaTeX{} and the style files
+\verb+iclr2027_conference.sty+ and \verb+iclr2027_conference.bst+ (to be used with \LaTeX{}2e). The file
+\verb+iclr2027_conference.tex+ may be used as a ``shell'' for writing your paper. All you
+have to do is replace the author, title, abstract, and text of the paper with
+your own.
+
+The formatting instructions contained in these style files are summarized in
+sections \ref{gen_inst}, \ref{headings}, and \ref{others} below.
+
+\section{General formatting instructions}
+\label{gen_inst}
+
+The text must be confined within a rectangle 5.5~inches (33~picas) wide and
+9~inches (54~picas) long. The left margin is 1.5~inch (9~picas).
+Use 10~point type with a vertical spacing of 11~points. Times New Roman is the
+preferred typeface throughout. Paragraphs are separated by 1/2~line space,
+with no indentation.
+
+Paper title is 17~point, in small caps and left-aligned.
+All pages should start at 1~inch (6~picas) from the top of the page.
+
+Authors' names are
+set in boldface, and each name is placed above its corresponding
+address. The lead author's name is to be listed first, and
+the co-authors' names are set to follow. Authors sharing the
+same address can be on the same line.
+
+Please pay special attention to the instructions in section \ref{others}
+regarding figures, tables, acknowledgments, and references.
+
+
+There will be a strict upper limit of \textbf{9 pages} for the main text of the initial submission, with unlimited additional pages for citations. This limit will be expanded to \textbf{10 pages} for rebuttal/camera ready.
+
+\section{Headings: first level}
+\label{headings}
+
+First level headings are in small caps,
+flush left and in point size 12. One line space before the first level
+heading and 1/2~line space after the first level heading.
+
+\subsection{Headings: second level}
+
+Second level headings are in small caps,
+flush left and in point size 10. One line space before the second level
+heading and 1/2~line space after the second level heading.
+
+\subsubsection{Headings: third level}
+
+Third level headings are in small caps,
+flush left and in point size 10. One line space before the third level
+heading and 1/2~line space after the third level heading.
+
+\section{Citations, figures, tables, references}
+\label{others}
+
+These instructions apply to everyone, regardless of the formatter being used.
+
+\subsection{Citations within the text}
+
+Citations within the text should be based on the \texttt{natbib} package
+and include the authors' last names and year (with the ``et~al.'' construct
+for more than two authors). When the authors or the publication are
+included in the sentence, the citation should not be in parenthesis using \verb|\citet{}| (as
+in ``See \citet{Hinton06} for more information.''). Otherwise, the citation
+should be in parenthesis using \verb|\citep{}| (as in ``Deep learning shows promise to make progress
+towards AI~\citep{Bengio+chapter2007}.'').
+
+The corresponding references are to be listed in alphabetical order of
+authors, in the \textsc{References} section. As to the format of the
+references themselves, any style is acceptable as long as it is used
+consistently.
+
+\subsection{Footnotes}
+
+Indicate footnotes with a number\footnote{Sample of the first footnote} in the
+text. Place the footnotes at the bottom of the page on which they appear.
+Precede the footnote with a horizontal rule of 2~inches
+(12~picas).\footnote{Sample of the second footnote}
+
+\subsection{Figures}
+
+All artwork must be neat, clean, and legible. Lines should be dark
+enough for purposes of reproduction; art work should not be
+hand-drawn. The figure number and caption always appear after the
+figure. Place one line space before the figure caption, and one line
+space after the figure. The figure caption is lower case (except for
+first word and proper nouns); figures are numbered consecutively.
+
+Make sure the figure caption does not get separated from the figure.
+Leave sufficient space to avoid splitting the figure and figure caption.
+
+You may use color figures.
+However, it is best for the
+figure captions and the paper body to make sense if the paper is printed
+either in black/white or in color.
+\begin{figure}[h]
+\begin{center}
+%\framebox[4.0in]{$\;$}
+\fbox{\rule[-.5cm]{0cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
+\end{center}
+\caption{Sample figure caption.}
+\end{figure}
+
+\subsection{Tables}
+
+All tables must be centered, neat, clean and legible. Do not use hand-drawn
+tables. The table number and title always appear before the table. See
+Table~\ref{sample-table}.
+
+Place one line space before the table title, one line space after the table
+title, and one line space after the table. The table title must be lower case
+(except for first word and proper nouns); tables are numbered consecutively.
+
+\begin{table}[t]
+\caption{Sample table title}
+\label{sample-table}
+\begin{center}
+\begin{tabular}{ll}
+\multicolumn{1}{c}{\bf PART}  &\multicolumn{1}{c}{\bf DESCRIPTION}
+\\ \hline \\
+Dendrite         &Input terminal \\
+Axon             &Output terminal \\
+Soma             &Cell body (contains cell nucleus) \\
+\end{tabular}
+\end{center}
+\end{table}
+
+\section{Default Notation}
+
+In an attempt to encourage standardized notation, we have included the
+notation file from the textbook, \textit{Deep Learning}
+\cite{goodfellow2016deep} available at
+\url{https://github.com/goodfeli/dlbook_notation/}.  Use of this style
+is not required and can be disabled by commenting out
+\texttt{math\_commands.tex}.
+
+
+\centerline{\bf Numbers and Arrays}
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{p{1in}p{3.25in}}
+$\displaystyle a$ & A scalar (integer or real)\\
+$\displaystyle \va$ & A vector\\
+$\displaystyle \mA$ & A matrix\\
+$\displaystyle \tA$ & A tensor\\
+$\displaystyle \mI_n$ & Identity matrix with $n$ rows and $n$ columns\\
+$\displaystyle \mI$ & Identity matrix with dimensionality implied by context\\
+$\displaystyle \ve^{(i)}$ & Standard basis vector $[0,\dots,0,1,0,\dots,0]$ with a 1 at position $i$\\
+$\displaystyle \text{diag}(\va)$ & A square, diagonal matrix with diagonal entries given by $\va$\\
+$\displaystyle \ra$ & A scalar random variable\\
+$\displaystyle \rva$ & A vector-valued random variable\\
+$\displaystyle \rmA$ & A matrix-valued random variable\\
+\end{tabular}
+\egroup
+\vspace{0.25cm}
+
+\centerline{\bf Sets and Graphs}
+\bgroup
+\def\arraystretch{1.5}
+
+\begin{tabular}{p{1.25in}p{3.25in}}
+$\displaystyle \sA$ & A set\\
+$\displaystyle \R$ & The set of real numbers \\
+$\displaystyle \{0, 1\}$ & The set containing 0 and 1 \\
+$\displaystyle \{0, 1, \dots, n \}$ & The set of all integers between $0$ and $n$\\
+$\displaystyle [a, b]$ & The real interval including $a$ and $b$\\
+$\displaystyle (a, b]$ & The real interval excluding $a$ but including $b$\\
+$\displaystyle \sA \backslash \sB$ & Set subtraction, i.e., the set containing the elements of $\sA$ that are not in $\sB$\\
+$\displaystyle \gG$ & A graph\\
+$\displaystyle \parents_\gG(\ervx_i)$ & The parents of $\ervx_i$ in $\gG$
+\end{tabular}
+\vspace{0.25cm}
+
+
+\centerline{\bf Indexing}
+\bgroup
+\def\arraystretch{1.5}
+
+\begin{tabular}{p{1.25in}p{3.25in}}
+$\displaystyle \eva_i$ & Element $i$ of vector $\va$, with indexing starting at 1 \\
+$\displaystyle \eva_{-i}$ & All elements of vector $\va$ except for element $i$ \\
+$\displaystyle \emA_{i,j}$ & Element $i, j$ of matrix $\mA$ \\
+$\displaystyle \mA_{i, :}$ & Row $i$ of matrix $\mA$ \\
+$\displaystyle \mA_{:, i}$ & Column $i$ of matrix $\mA$ \\
+$\displaystyle \etA_{i, j, k}$ & Element $(i, j, k)$ of a 3-D tensor $\tA$\\
+$\displaystyle \tA_{:, :, i}$ & 2-D slice of a 3-D tensor\\
+$\displaystyle \erva_i$ & Element $i$ of the random vector $\rva$ \\
+\end{tabular}
+\egroup
+\vspace{0.25cm}
+
+
+\centerline{\bf Calculus}
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{p{1.25in}p{3.25in}}
+% NOTE: the [2ex] on the next line adds extra height to that row of the table.
+% Without that command, the fraction on the first line is too tall and collides
+% with the fraction on the second line.
+$\displaystyle\frac{d y} {d x}$ & Derivative of $y$ with respect to $x$\\ [2ex]
+$\displaystyle \frac{\partial y} {\partial x} $ & Partial derivative of $y$ with respect to $x$ \\
+$\displaystyle \nabla_\vx y $ & Gradient of $y$ with respect to $\vx$ \\
+$\displaystyle \nabla_\mX y $ & Matrix derivatives of $y$ with respect to $\mX$ \\
+$\displaystyle \nabla_\tX y $ & Tensor containing derivatives of $y$ with respect to $\tX$ \\
+$\displaystyle \frac{\partial f}{\partial \vx} $ & Jacobian matrix $\mJ \in \R^{m\times n}$ of $f: \R^n \rightarrow \R^m$\\
+$\displaystyle \nabla_\vx^2 f(\vx)\text{ or }\mH( f)(\vx)$ & The Hessian matrix of $f$ at input point $\vx$\\
+$\displaystyle \int f(\vx) d\vx $ & Definite integral over the entire domain of $\vx$ \\
+$\displaystyle \int_\sS f(\vx) d\vx$ & Definite integral with respect to $\vx$ over the set $\sS$ \\
+\end{tabular}
+\egroup
+\vspace{0.25cm}
+
+\centerline{\bf Probability and Information Theory}
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{p{1.25in}p{3.25in}}
+$\displaystyle P(\ra)$ & A probability distribution over a discrete variable\\
+$\displaystyle p(\ra)$ & A probability distribution over a continuous variable, or over
+a variable whose type has not been specified\\
+$\displaystyle \ra \sim P$ & Random variable $\ra$ has distribution $P$\\% so thing on left of \sim should always be a random variable, with name beginning with \r
+$\displaystyle  \E_{\rx\sim P} [ f(x) ]\text{ or } \E f(x)$ & Expectation of $f(x)$ with respect to $P(\rx)$ \\
+$\displaystyle \Var(f(x)) $ &  Variance of $f(x)$ under $P(\rx)$ \\
+$\displaystyle \Cov(f(x),g(x)) $ & Covariance of $f(x)$ and $g(x)$ under $P(\rx)$\\
+$\displaystyle H(\rx) $ & Shannon entropy of the random variable $\rx$\\
+$\displaystyle \KL ( P \Vert Q ) $ & Kullback-Leibler divergence of P and Q \\
+$\displaystyle \mathcal{N} ( \vx ; \vmu , \mSigma)$ & Gaussian distribution %
+over $\vx$ with mean $\vmu$ and covariance $\mSigma$ \\
+\end{tabular}
+\egroup
+\vspace{0.25cm}
+
+\centerline{\bf Functions}
+\bgroup
+\def\arraystretch{1.5}
+\begin{tabular}{p{1.25in}p{3.25in}}
+$\displaystyle f: \sA \rightarrow \sB$ & The function $f$ with domain $\sA$ and range $\sB$\\
+$\displaystyle f \circ g $ & Composition of the functions $f$ and $g$ \\
+  $\displaystyle f(\vx ; \vtheta) $ & A function of $\vx$ parametrized by $\vtheta$.
+  (Sometimes we write $f(\vx)$ and omit the argument $\vtheta$ to lighten notation) \\
+$\displaystyle \log x$ & Natural logarithm of $x$ \\
+$\displaystyle \sigma(x)$ & Logistic sigmoid, $\displaystyle \frac{1} {1 + \exp(-x)}$ \\
+$\displaystyle \zeta(x)$ & Softplus, $\log(1 + \exp(x))$ \\
+$\displaystyle || \vx ||_p $ & $\normlp$ norm of $\vx$ \\
+$\displaystyle || \vx || $ & $\normltwo$ norm of $\vx$ \\
+$\displaystyle x^+$ & Positive part of $x$, i.e., $\max(0,x)$\\
+$\displaystyle \1_\mathrm{condition}$ & is 1 if the condition is true, 0 otherwise\\
+\end{tabular}
+\egroup
+\vspace{0.25cm}
+
+
+
+\section{Final instructions}
+Do not change any aspects of the formatting parameters in the style files.
+In particular, do not modify the width or length of the rectangle the text
+should fit into, and do not change font sizes (except perhaps in the
+\textsc{References} section; see below). Please note that pages should be
+numbered.
+
+\section{Preparing PostScript or PDF files}
+
+Please prepare PostScript or PDF files with paper size ``US Letter'', and
+not, for example, ``A4''. The -t
+letter option on dvips will produce US Letter files.
+
+Consider directly generating PDF files using \verb+pdflatex+
+(especially if you are a MiKTeX user).
+PDF figures must be substituted for EPS figures, however.
+
+Otherwise, please generate your PostScript and PDF files with the following commands:
+\begin{verbatim}
+dvips mypaper.dvi -t letter -Ppdf -G0 -o mypaper.ps
+ps2pdf mypaper.ps mypaper.pdf
+\end{verbatim}
+
+\subsection{Margins in LaTeX}
+
+Most of the margin problems come from figures positioned by hand using
+\verb+\special+ or other commands. We suggest using the command
+\verb+\includegraphics+
+from the graphicx package. Always specify the figure width as a multiple of
+the line width as in the example below using .eps graphics
+\begin{verbatim}
+   \usepackage[dvips]{graphicx} ...
+   \includegraphics[width=0.8\linewidth]{myfile.eps}
+\end{verbatim}
+or % Apr 2009 addition
+\begin{verbatim}
+   \usepackage[pdftex]{graphicx} ...
+   \includegraphics[width=0.8\linewidth]{myfile.pdf}
+\end{verbatim}
+for .pdf graphics.
+See section~4.4 in the graphics bundle documentation (\url{http://www.ctan.org/tex-archive/macros/latex/required/graphics/grfguide.ps})
+
+A number of width problems arise when LaTeX cannot properly hyphenate a
+line. Please give LaTeX hyphenation hints using the \verb+\-+ command.
+
+\subsubsection*{Author Contributions}
+If you'd like to, you may include  a section for author contributions as is done
+in many journals. This is optional and at the discretion of the authors.
+
+\subsubsection*{Acknowledgments}
+Use unnumbered third level headings for the acknowledgments. All
+acknowledgments, including those to funding agencies, go at the end of the paper.

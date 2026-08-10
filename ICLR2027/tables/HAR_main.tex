@@ -1,0 +1,46 @@
+\begin{table}[t!]
+\centering
+\caption{Per-model halluci-action rates in both environments (\%, macro over
+trajectories; lower is better). The two environments are reported separately
+rather than pooled: which direction dominates is not a property of the model
+alone, and averaging the columns would erase that. \texttt{qwen3-8B} is the
+clearest case---reverse-dominant on Odoo, forward-dominant on AppWorld.}
+\label{tab:main-results}
+\small
+% 3.1pt, not 3.5: eleven columns means ten gaps, so each 0.1pt here is 2pt of
+% table width, and at 3.5 the table ran 7pt past the right margin.  Taking
+% 0.4pt off each side of each gap gives back 8pt, which is the whole overflow
+% plus a point of slack -- no column or font change needed.
+\setlength{\tabcolsep}{3.1pt}
+\begin{tabular}{lrrrrrrrrrr}
+\toprule
+& \multicolumn{2}{c}{\textbf{Said-not-done}}
+& \multicolumn{2}{c}{\textbf{Done-not-said}}
+& \multicolumn{2}{c}{\textbf{HAR}}
+& \multicolumn{2}{c}{\textbf{HAR\textsubscript{sev}}}
+& \multicolumn{2}{c}{\textbf{Fact-fab.}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}
+\textbf{Model} & Odoo & AppW. & Odoo & AppW. & Odoo & AppW. & Odoo & AppW. & Odoo & AppW. \\
+\midrule
+\texttt{deepseek-chat}     &  4.4 & 10.1 &  1.8 &  3.1 &  3.3 &  7.3 &  0.2 &  0.3 & 2.4 & 0.7 \\
+\texttt{deepseek-reasoner} &  2.0 &  5.3 &  5.7 &  3.3 &  4.2 &  4.8 &  0.2 &  0.5 & 1.3 & 0.4 \\
+\texttt{gemini-3.1-flash}  &  0.7 &  4.0 & 30.9 & 23.3 & 16.1 & 18.2 &  0.0 &  0.8 & 1.3 & 1.5 \\
+\texttt{gpt-4o-mini}       &  6.7 & 25.8 & 35.7 & 32.6 & 32.1 & 32.2 &  5.4 & 10.1 & 3.9 & 8.0 \\
+\texttt{qwen3-8B}          & 25.5 & 29.9 & 31.4 &  2.1 & 45.9 & 18.0 & 12.6 &  5.9 & 3.0 & 5.2 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\raggedright
+\footnotesize
+Each entry is a mean over trajectories, taken per metric over the trajectories on
+which that metric is defined; a trajectory with no eligible claim has no
+said-not-done rate and is excluded from that column only.
+$\mathrm{HAR}_{\mathrm{sev}}$ restricts scoring to required actions claimed but
+not performed and forbidden actions performed but not disclosed.
+\emph{Fact-fab.}\ is the share of observation claims judged unsupported by
+context or tool evidence; unlike the other columns it is a pooled rate over
+claims rather than a mean over trajectories, since its denominator is a
+different claim population.
+
+\end{table}
