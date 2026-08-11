@@ -17,12 +17,13 @@ production directory consumed by recompute_averages.py is a `_v2` one
 ..._gpt4o_mini_v2, ..._qwen_v2), so v2 is what the paper reports and v2 is what
 this script emits.
 
-Stage 1 also has v0/v1/v2 on disk. The only version-tagged stage-1 artifacts are
-in stage1/outputs/, which is the prompt-comparison eval set (six files each of
-gemini-pro_v1, gemini-pro_v2, deepseek_v1, deepseek_v2) rather than the
-production run, so the production version is NOT recoverable from filenames.
-This script emits v2 as the newest, and prints a warning saying so. CONFIRM
-BEFORE SUBMISSION.
+Stage 1 also has v0/v1/v2 on disk, and the production version is v1, not the
+newest. stage1/outputs/ is a prompt-comparison eval set and does not settle it,
+but stage1/results_<model>/ is the production run that feeds stage 2, and all
+455 of its files are named *_v1_judge (99 + 83 + 95 + 83 + 95 across the five
+agents). Zero are v2. The behaviour agrees: v2 added a rule making "The user
+said X" an observation rather than non_actionable_text, and the 6211 production
+claims contain exactly one span of that shape -- what v1 produces, not v2.
 
 Two files are deliberately NOT reproduced in full:
   * few-shot example banks (stage 1: 1579 words, stage 2: 3173 words). One
@@ -76,11 +77,15 @@ def verbatim(text: str, label: str) -> str:
     setting that wraps inside a token like a long JSON key. commandchars is left
     off on purpose so that backslashes and braces in the prompts print as
     themselves -- nothing in a prompt should be interpreted as LaTeX.
+
+    NO frame=. A framed fancyvrb block is unbreakable, so a prompt longer than
+    the space left on the page moves whole to the next one and leaves the
+    remainder empty -- that cost 59% of one page. Unframed blocks break, and the
+    \\paragraph label above each one already says where it starts.
     """
     return (f"\\paragraph{{{label}}}\\mbox{{}}\n\n"
             "\\begin{Verbatim}[fontsize=\\scriptsize, breaklines=true, "
-            "breakanywhere=true, frame=leftline, framerule=0.4pt, "
-            "rulecolor=\\color{black!25}, xleftmargin=6pt]\n"
+            "breakanywhere=true, xleftmargin=10pt, samepage=false]\n"
             f"{text}\n"
             "\\end{Verbatim}\n")
 
@@ -107,8 +112,8 @@ How to work:
 
 Each tool description includes important constraints; follow them."""
 
-s1_system = read(S1 / "system_v2.md")
-s1_few = read(S1 / "fewshot_v2.md")
+s1_system = read(S1 / "system_v1.md")
+s1_few = read(S1 / "fewshot_v1.md")
 s2_template = read(S2 / "propmt_template.md")
 s2_guideline = read(S2 / "action_validation_guideline.md")
 s2_few = read(S2 / "stage2_examples.md")
@@ -130,6 +135,10 @@ parts.append(r"""% =============================================================
 % ===========================================================================
 \section{Prompts}
 \label{app:prompts}
+% Tried and reverted: \topsep=3pt / \partopsep=0pt around the verbatim blocks.
+% Measured saving across the ten pages was 0.01 of a page, so it bought nothing
+% and is not worth the deviation from the document's list spacing.
+
 
 This section reproduces the prompts behind every model call in the study: the
 system prompt given to the agent under evaluation in each environment, and the
@@ -160,7 +169,9 @@ parts.append(r"""
 
 The first pass sees only the agent's visible text---no tool calls, no
 results---so that claim extraction cannot be contaminated by the evidence the
-later passes will check the claims against.
+later passes will check the claims against. The prompt below is version v1,
+which produced every extracted claim the paper reports; a later v1 revision
+exists in the repository but was not used for any reported run.
 """)
 parts.append(verbatim(s1_system, "System prompt."))
 parts.append(verbatim(section(s1_few, "Example B"),
@@ -207,9 +218,8 @@ OUT.write_text("\n".join(parts), encoding="utf-8")
 words = sum(len(p.split()) for p in parts)
 print(f"wrote {OUT}  ({words} words, ~{words/450:.0f}-{words/350:.0f} pages verbatim)")
 print("\nsources:")
-for p in (RESEARCH / "prompts" / "system_KL1.txt", S1 / "system_v2.md", S1 / "fewshot_v2.md",
+for p in (RESEARCH / "prompts" / "system_KL1.txt", S1 / "system_v1.md", S1 / "fewshot_v1.md",
           S2 / "propmt_template.md", S2 / "action_validation_guideline.md",
           S2 / "stage2_examples.md", S3 / "action_judge_template.md", S3 / "requirement_rubric.md"):
     print(f"  {len(read(p).split()):>5} words  {p.relative_to(RESEARCH)}")
-print("\nWARNING: the stage-1 production prompt version is not recorded in any")
-print("artifact; v2 is emitted as the newest on disk. Confirm before submission.")
+print("\nstage 1 = v1 (455/455 production files are *_v1_judge); stage 2 = v2")

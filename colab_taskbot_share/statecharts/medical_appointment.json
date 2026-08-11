@@ -1,0 +1,266 @@
+[
+  {
+    "id": 0,
+    "type": 2,
+    "text": "Hello this is ABC Health customer support department, how can I help you today?",
+    "transition_list": [
+      {
+        "condition_text": "User needs to reschedule an appointment",
+        "next_node_id": 1
+      },
+      {
+        "condition_text": "User is about to have a surgery, and is asking about preparations",
+        "next_node_id": 2
+      },
+      {
+        "condition_text": "user asks to be transferred to an agent",
+        "next_node_id": 3
+      },
+      {
+        "condition_text": "User is having a medical condition",
+        "next_node_id": 4
+      }
+    ]
+  },
+  {
+    "id": 1,
+    "type": 1,
+    "text": "Ask user's name and date of birth",
+    "transition_list": [
+      {
+        "condition_text": "got the user name and date of birth",
+        "next_node_id": 5
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "type": 1,
+    "text": "Ask user if their surgery is within 72 hours",
+    "transition_list": [
+      {
+        "condition_text": "If within 72 hours",
+        "next_node_id": 6
+      },
+      {
+        "condition_text": "If not within 72 hours",
+        "next_node_id": 7
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "type": 1,
+    "text": "Ask user why they need to speak to a representative, why they are calling",
+    "transition_list": [
+      {
+        "condition_text": "If it's a medical question",
+        "next_node_id": 8
+      },
+      {
+        "condition_text": "If it's about reschedule or cancel existing appointment",
+        "next_node_id": 1
+      },
+      {
+        "condition_text": "If they insist on talking to agent",
+        "next_node_id": 9
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "type": 1,
+    "text": "Ask user if this is an emergency.",
+    "transition_list": [
+      {
+        "condition_text": "If this is an emergency",
+        "next_node_id": 10
+      },
+      {
+        "condition_text": "If this is not an emergency",
+        "next_node_id": 8
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "type": 3,
+    "function": {
+      "name": "check_appt_detail",
+      "parameters": [
+        {
+          "type": "string",
+          "parameter_name": "user_name"
+        },
+        {
+          "type": "string",
+          "parameter_name": "date_of_birth"
+        }
+      ]
+    },
+    "transition_list": [
+      {
+        "condition_text": "Got the appointment details",
+        "next_node_id": 11
+      },
+      {
+        "condition_text": "Failed to get appointment details",
+        "next_node_id": 12
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "type": 2,
+    "text": "Let me transfer you to the office to make sure you got the right instruction",
+    "transition_list": [
+      {
+        "condition_text": "",
+        "next_node_id": 13
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "type": 1,
+    "text": "Ask user what surgery they are going through, and use your expertise to provide some preparation tips. Ask if they have any questions.",
+    "transition_list": [
+      {
+        "condition_text": "User has no more questions",
+        "next_node_id": 14
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "type": 1,
+    "text": "Ask user to describe their medical condition and ask what questions they have, and use your expertise to provide answers to them. Ask if they have any additional questions.",
+    "transition_list": [
+      {
+        "condition_text": "User does not have any questions",
+        "next_node_id": 15
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "type": 1,
+    "text": "Transferring you to the office now.",
+    "transition_list": [
+      {
+        "condition_text": "",
+        "next_node_id": 13
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "type": 2,
+    "text": "Please hang up dial 911 immediately.",
+    "transition_list": [
+      {
+        "condition_text": "User acknowledges",
+        "next_node_id": 16
+      }
+    ]
+  },
+  {
+    "id": 11,
+    "type": 1,
+    "text": "Tell user the retrieved appointment details, and ask what they need to change",
+    "transition_list": [
+      {
+        "condition_text": "Got the change details from user",
+        "next_node_id": 17
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "type": 1,
+    "text": "Tell user that you're not able to retrieve the appt detail, and ask what's the change they need to make for the appt",
+    "transition_list": [
+      {
+        "condition_text": "Got the change details from user",
+        "next_node_id": 17
+      }
+    ]
+  },
+  {
+    "id": 13,
+    "type": 3,
+    "function": {
+      "name": "transfer_call",
+      "parameters": []
+    }
+  },
+  {
+    "id": 14,
+    "type": 1,
+    "text": "Tell user to call the office again within 72 hours of the surgery to speak to the doctor. Politely end the call.",
+    "transition_list": [
+      {
+        "condition_text": "",
+        "next_node_id": 16
+      }
+    ]
+  },
+  {
+    "id": 15,
+    "type": 2,
+    "text": "Hope you have a great day, take care!",
+    "transition_list": [
+      {
+        "condition_text": "",
+        "next_node_id": 16
+      }
+    ]
+  },
+  {
+    "id": 16,
+    "type": 3,
+    "function": {
+      "name": "end_call",
+      "parameters": []
+    }
+  },
+  {
+    "id": 17,
+    "type": 3,
+    "text": "Alright, updating the appointment for you now.",
+    "function": {
+      "name": "update_appt_detail",
+      "parameters": [
+        {
+          "type": "string",
+          "parameter_name": "user_name"
+        },
+        {
+          "type": "string",
+          "parameter_name": "date_of_birth"
+        },
+        {
+          "type": "string",
+          "parameter_name": "change_detail"
+        }
+      ]
+    },
+    "transition_list": [
+      {
+        "condition_text": "Got success from the function",
+        "next_node_id": 18
+      }
+    ]
+  },
+  {
+    "id": 18,
+    "type": 1,
+    "text": "Tell user that the appointment has been updated. Ask if they have any additional questions. Answer them with your expertise.",
+    "transition_list": [
+      {
+        "condition_text": "User don't have any questions",
+        "next_node_id": 15
+      }
+    ]
+  }
+]

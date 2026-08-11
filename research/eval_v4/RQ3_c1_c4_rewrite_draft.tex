@@ -1,0 +1,109 @@
+% Alternative RQ3 draft for comparison with the current version.
+% Counts use the exhaustive 735-case C1--C4 taxonomy; one extraction artifact
+% is excluded. Validate the automated say-side labels before final submission.
+
+\subsection{RQ3: Where does the say--do alignment chain break?}
+\label{sec:rq3-alternative}
+
+RQ1 establishes that halluci-action occurs in both directions, while RQ2 shows
+that factuality does not expose it. We next ask what forms these mismatches take
+and where they arise in the chain from a verbal self-report to an executed and
+disclosed action. We classify every confirmed instance using four conditions
+that a faithful self-report must satisfy. For a claim that reports operation
+$X$ on target $Y$ with outcome $Z$, the operation must be executed (C1),
+grounded to the stated target and parameters (C2), and verified to have achieved
+the stated outcome (C3). In the reverse direction, every executed action must be
+disclosed by the agent's language (C4). Taking the first failed claim-side gate
+makes C1--C3 mutually exclusive; C4 is the corresponding action-anchored gate
+(Figure~\ref{fig:rq3-fault-tree}).
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/rq3_c1_c4_fault_tree.pdf}
+  \caption{A fault-tree decomposition of halluci-action. C1--C3 decompose an
+  unsupported action claim by the first failed claim-side gate; C4 captures
+  executed actions with no verbal disclosure. Counts exclude one extraction
+  artifact.}
+  \label{fig:rq3-fault-tree}
+\end{figure}
+
+Of the 735 genuine halluci-action instances, 86 fail at execution (C1), 33 at
+grounding (C2), eight at outcome verification (C3), and 608 at disclosure (C4).
+The large C4 count should not be read as 608 equally serious violations: 586 are
+undisclosed reads, whereas 22 are hidden state mutations, including 17 actions
+judged forbidden. Conversely, the smaller claim-side classes contain several of
+the failures most likely to create false assurance. The taxonomy therefore
+separates the mechanism of mismatch from its risk: failure location tells us
+where alignment broke, while action requirement, mutation status, and disclosure
+determine its consequence.
+
+\paragraph{C1: verbal commitments outrun execution.}
+C1 contains 86 claims for which no matching operation appears in the trace. Most
+are abandoned intentions (84), such as ``Let me check what products might be
+relevant'' followed by no product lookup. These cases add narration noise but
+usually do not assert a completed state. The remaining two are fabricated
+completions: the agent reports a task as complete despite issuing no operation
+that could realize the claimed result. The distinction matters because identical
+trace absence can express either a dropped plan or direct false assurance.
+
+\paragraph{C2: operations lose their referents during grounding.}
+In 33 cases, an operation is attempted but its structured arguments do not match
+the entity or parameters named in the claim. For example, an agent says it will
+log an interaction against a lead but calls
+\texttt{log\_interaction(customer\_id=13)}, writing to a customer record instead.
+Eleven of the 33 C2 cases mutate persistent state. These cases expose a failure at
+the language-to-tool boundary: the high-level operation survives, but its target
+does not. They motivate typed entity bindings and explicit target verification
+before state-changing calls.
+
+\paragraph{C3: attempts are converted into unverified success.}
+Eight cases reach the intended operation and target but fail to establish the
+reported result. Four are false-success reports after an error, empty result, or
+rejected state transition. In a representative sales task, the agent claims that
+a partial delivery was arranged even though the tool payload states
+\texttt{delivery\_created=false}. Four further cases assert an outcome or target
+binding that the trace never verifies. These errors occur at the result-to-report
+boundary and suggest that completion language should be gated on an explicit
+success signal or postcondition read-back.
+
+\paragraph{C4: tool use is treated as private rather than communicative.}
+C4 is the dominant class, comprising 608 executed actions with no matching verbal
+disclosure. Its composition is sharply bimodal. Most are read-only lookups (586)
+that do not change environment state, explaining much of the high raw
+done-not-said rate for terse agents. The remaining 22 are hidden mutations; 17 of
+these violate a task requirement or explicit constraint. This small covert slice
+is the central oversight risk: transcript-only monitoring sees a benign response
+while the execution trace contains a consequential state change.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/rq3_failure_composition_by_model.pdf}
+  \caption{Composition of genuine halluci-action instances within each model.
+  C4 is separated into undisclosed reads and hidden mutations because these have
+  substantially different consequences. Numbers inside sufficiently large
+  segments are instance counts.}
+  \label{fig:rq3-model-composition}
+\end{figure}
+
+\paragraph{Models have different failure signatures.}
+Figure~\ref{fig:rq3-model-composition} shows that the aggregate HAR values in RQ1
+mask distinct mechanisms. DeepSeek-Chat concentrates in unexecuted commitments
+and misgrounded executions, consistent with a verbose agent that narrates future
+steps and occasionally loses entity references. Gemini-Flash is almost entirely
+composed of undisclosed reads, making its reverse gap large but generally
+non-mutating. Qwen3-8B contains the largest hidden-mutation residue, including 11
+covert forbidden actions, while GPT-4o-mini contributes disproportionately to the
+small C3 false-success class. Models therefore differ not only in how frequently
+their words and actions diverge, but also in which link of the alignment chain
+fails and how consequential that failure is.
+
+\paragraph{Scope and interpretation.}
+This taxonomy identifies the observable failure location; it does not by itself
+establish a causal account of the model's internal behavior. Explanations such as
+optimistic closure, entity-resolution weakness, or treating tools as private
+scratch space should therefore be read as mechanism hypotheses grounded in the
+trace patterns. Before final reporting, we exclude one non-actionable extraction
+artifact, quarantine the known broken-tool-adjacent refund cases, and validate
+the automatically assigned claim-side labels on a stratified human-reviewed
+sample. Detailed definitions, counts, and representative cases are provided in
+Appendix~X.
