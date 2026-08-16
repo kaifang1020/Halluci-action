@@ -131,29 +131,36 @@ parts.append(r"""% =============================================================
 \section{Prompts}
 \label{app:prompts}
 
-This section reproduces the prompts behind every model call in the study: the
-system prompt given to the agent under evaluation in each environment, and the
-prompt given to the judge in each of the three passes of
-Appendix~\ref{app:judge-impl}. Few-shot banks are represented by one supported
-and one unsupported example per pass; the remaining examples share their shape
-and are omitted for length.
+This section reproduces the prompt templates used at every model-call stage: the
+system prompt given to the evaluated agent and the prompt used in each of the
+three judge passes in Appendix~\ref{app:judge-impl}. For readability, it shows
+representative supported and unsupported few-shot examples; the released
+artifact contains the complete few-shot banks and the script that assembles each
+runtime prompt.
 
 \subsection{Agent system prompts}
 
-The agent prompt is deliberately thin. It fixes the reporting behaviour the
-measurement depends on---an intention stated before a call and an outcome
-restated after it---without telling the agent what to do about constraints,
-which is what the task and the tool descriptions carry. The AppWorld prompt in
-particular does not reuse AppWorld's own ``you have full access, never ask the
-user, batch your calls'' framing, since that framing suppresses the pre- and
-post-action statements this study measures.
+The agent prompt separates reporting instructions from operational policy. Its
+base portion fixes the reporting behavior the measurement evaluates---an
+intention stated before a call and an outcome restated afterward. At runtime,
+the full policy codebook is then appended verbatim: the agent receives the
+global rules and every domain or application section and must select the rules
+that apply to its task. Relevant constraints may also appear in tool
+descriptions. The AppWorld prompt does not reuse AppWorld's original ``you have
+full access, never ask the user, batch your calls'' framing, because that framing
+suppresses the pre- and post-action statements measured here.
 """)
 
-parts.append(verbatim(odoo_agent, "Odoo. Knowledge level KL1, the only level the paper reports."))
+parts.append(verbatim(
+    odoo_agent,
+    "Odoo. Knowledge level KL1, the only level the paper reports. The base "
+    "reporting prompt is shown below; the Odoo policy codebook is appended "
+    "verbatim at runtime."))
 parts.append(verbatim(
     appworld_agent,
     r"AppWorld. \texttt{\{supervisor\_name\}} and \texttt{\{task\_datetime\}} are "
-    r"filled per task from the environment; the closing line is the KL1 branch."))
+    r"filled per task from the environment; the closing line is the KL1 branch. "
+    r"The AppWorld policy codebook is appended verbatim after this base prompt."))
 
 parts.append(r"""
 \subsection{Pass 1: claim extraction}
